@@ -1,23 +1,16 @@
 #
-# Copyright (C) 2024 by THE-VIP-BOY-OP@Github, < https://github.com/THE-VIP-BOY-OP >.
-#
-# This file is part of < https://github.com/THE-VIP-BOY-OP/VIPMUSIC > project,
-# and is released under the MIT License.
-# Please see < https://github.com/THE-VIP-BOY-OP/VIPMUSIC/blob/master/LICENSE >
-#
-# All rights reserved.
+# Copyright (C) 2024 by Spy-Music Project
+# Specialized for Spy Bot Structure
 #
 
 import traceback
 from functools import wraps
-
 from pyrogram.errors.exceptions.forbidden_403 import ChatWriteForbidden
-
 from config import LOG_GROUP_ID
-from VIPMUSIC import app
-
+from Spy import app
 
 def split_limits(text):
+    """Telegram message limit (4096) ko handle karne ke liye text split karta hai."""
     if len(text) < 2048:
         return [text]
 
@@ -32,38 +25,54 @@ def split_limits(text):
             small_msg = line
 
     result.append(small_msg)
-
     return result
 
 
 def capture_err(func):
+    """
+    Ek decorator jo handlers mein aane wale errors ko catch karta hai
+    aur unhe Log Group mein bhejta hai.
+    """
     @wraps(func)
     async def capture(client, message, *args, **kwargs):
         try:
             return await func(client, message, *args, **kwargs)
         except ChatWriteForbidden:
-            await app.leave_chat(message.chat.id)
+            # Agar bot ko message bhejne ki permission nahi hai, toh group chhod do
+            try:
+                await app.leave_chat(message.chat.id)
+            except:
+                pass
             return
         except Exception as err:
+            # Pura error traceback format karein
             errors = traceback.format_exc()
-            error_feedback = split_limits(
-                "**ERROR** | {} | {}\n```command\n{}```\n\n```python\n{}```\n".format(
-                    0 if not message.from_user else message.from_user.mention,
-                    (
-                        0
-                        if not message.chat
-                        else (
-                            f"@{message.chat.username}"
-                            if message.chat.username
-                            else f"`{message.chat.id}`"
-                        )
-                    ),
-                    message.text or message.caption,
-                    "".join(errors),
-                ),
+            
+            # User aur Chat ki info nikalein
+            user_info = "Unknown User" if not message.from_user else f"{message.from_user.mention} (`{message.from_user.id}`)"
+            chat_info = "Private" if not message.chat else (
+                f"@{message.chat.username}" if message.chat.username else f"`{message.chat.id}`"
             )
+            command_info = message.text or message.caption or "None"
+
+            # Log message taiyar karein
+            error_text = (
+                f"**#ᴇʀʀᴏʀ_ʟᴏɢ**\n\n"
+                f"**👤 ᴜsᴇʀ:** {user_info}\n"
+                f"**👥 ᴄʜᴀᴛ:** {chat_info}\n"
+                f"**💬 ᴄᴏᴍᴍᴀɴᴅ:** `{command_info}`\n\n"
+                f"**📝 ᴛʀᴀᴄᴇʙᴀᴄᴋ:**\n```python\n{errors}```"
+            )
+
+            # Agar message bada hai toh split karke bhejein
+            error_feedback = split_limits(error_text)
             for x in error_feedback:
-                await app.send_message(LOG_GROUP_ID, x)
+                try:
+                    await app.send_message(LOG_GROUP_ID, x)
+                except:
+                    print(f"Error logging failed: {errors}")
+            
+            # Error ko console par bhi dikhayein
             raise err
 
     return capture
