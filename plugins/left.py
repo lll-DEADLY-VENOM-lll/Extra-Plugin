@@ -5,6 +5,7 @@ from typing import Optional, Union
 from PIL import Image, ImageDraw, ImageFont
 from pyrogram import filters
 from pyrogram.types import ChatMemberUpdated, InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.errors import RPCError  # Import RPCError to handle Telegram errors
 
 from VIPMUSIC import app
 
@@ -57,40 +58,56 @@ async def get_userinfo_img(
 
 @app.on_chat_member_updated(filters.group, group=-7)
 async def member_has_left(client: app, member: ChatMemberUpdated):
+    # Check if the member actually left and was not just updated
     if (
         not member.new_chat_member
+        and member.old_chat_member 
         and member.old_chat_member.status not in {"banned", "left", "restricted"}
-        and member.old_chat_member
     ):
         user = (
             member.old_chat_member.user if member.old_chat_member else member.from_user
         )
-        if user.photo:
-            photo = await app.download_media(user.photo.big_file_id)
-            welcome_photo = await get_userinfo_img(
-                bg_path=bg_path,
-                font_path=font_path,
-                user_id=user.id,
-                profile_path=photo,
+        
+        try:
+            # Prepare the photo
+            if user.photo:
+                photo = await app.download_media(user.photo.big_file_id)
+                welcome_photo = await get_userinfo_img(
+                    bg_path=bg_path,
+                    font_path=font_path,
+                    user_id=user.id,
+                    profile_path=photo,
+                )
+            else:
+                welcome_photo = random.choice(random_photo)
+
+            caption = f"**#New_Member_Left**\n\n**๏** {user.mention} **ʜᴀs ʟᴇғᴛ ᴛʜɪs ɢʀᴏᴜᴘ**\n**๏ sᴇᴇ ʏᴏᴜ sᴏᴏɴ ᴀɢᴀɪɴ..!**"
+            button_text = "๏ ᴠɪᴇᴡ ᴜsᴇʀ ๏"
+
+            # Attempt to send the photo
+            message = await client.send_photo(
+                chat_id=member.chat.id,
+                photo=welcome_photo,
+                caption=caption,
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton(button_text, user_id=user.id)]]
+                ),
             )
-        else:
-            welcome_photo = random.choice(random_photo)
 
-        caption = f"**#New_Member_Left**\n\n**๏** {user.mention} **ʜᴀs ʟᴇғᴛ ᴛʜɪs ɢʀᴏᴜᴘ**\n**๏ sᴇᴇ ʏᴏᴜ sᴏᴏɴ ᴀɢᴀɪɴ..!**"
-        button_text = "๏ ᴠɪᴇᴡ ᴜsᴇʀ ๏"
+            # Auto-delete task
+            async def delete_message():
+                try:
+                    await asyncio.sleep(30)
+                    await message.delete()
+                except Exception:
+                    pass
 
-        message = await client.send_photo(
-            chat_id=member.chat.id,
-            photo=welcome_photo,
-            caption=caption,
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton(button_text, user_id=user.id)]]
-            ),
-        )
+            asyncio.create_task(delete_message())
 
-        async def delete_message():
-            await asyncio.sleep(30)
-            await message.delete()
-
-        # Run the task
-        asyncio.create_task(delete_message())
+        except RPCError as e:
+            # This catches CHANNEL_PRIVATE or CHAT_WRITE_FORBIDDEN
+            print(f"Failed to send leave message in {member.chat.id}: {e}")
+            return
+        except Exception as e:
+            print(f"An unexpected error occurred: {e}")
+            return
