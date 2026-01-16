@@ -33,7 +33,7 @@ async def clones(client: Client, message: Message):
             [
                 [
                     InlineKeyboardButton(
-                        "🌱ƨσʋяcɛ🌱", url=f"https://github.com/THE-VIP-BOY-OP/VIP-MUSIC"
+                        "🌱ƨσʋяcɛ🌱", url=f""
                     )
                 ]
             ]
