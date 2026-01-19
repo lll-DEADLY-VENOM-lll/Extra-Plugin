@@ -1,10 +1,9 @@
 from pyrogram import Client, filters
 from pyrogram.types import Message
-from pytgcalls.types import Update, CallParticipantUpdated
-from pytgcalls.types.enums import ParticipantStatus
 from VIPMUSIC.core.mongo import mongodb 
 from VIPMUSIC import app
-from VIPMUSIC.core.call import VIP  # Bot ka pehle se bana hua call handler import kiya
+from VIPMUSIC.core.call import VIP  # Bot ka main call handler
+from pytgcalls.types import Update  # Sirf base Update import kiya
 
 # 1. Database check karne ka function
 async def is_monitoring_enabled(chat_id):
@@ -12,32 +11,36 @@ async def is_monitoring_enabled(chat_id):
     return status and status.get("status") == "on"
 
 # 2. Join/Leave detect karne wala function
-# Hum 'pytgcalls' ki jagah 'VIP' (bot ka default handler) use karenge
 @VIP.on_update()
 async def vc_participant_update(client, update: Update):
-    # Check karein agar update participant ke baare mein hai
-    if not isinstance(update, CallParticipantUpdated):
+    # Chat ID nikalne ki koshish (Alag-alag version ke liye)
+    chat_id = getattr(update, "chat_id", None)
+    if not chat_id:
         return
 
-    chat_id = update.chat_id
-    
-    # DB status check karein
+    # Check karein agar DB mein monitoring ON hai
     if await is_monitoring_enabled(chat_id):
-        user_id = update.user_id
+        # Update ke andar se user_id aur status nikalna (Dynamic tarika)
+        user_id = getattr(update, "user_id", None)
+        status = str(getattr(update, "status", "")).lower()
+
+        if not user_id:
+            return
+
         mention = f"[{user_id}](tg://user?id={user_id})"
 
-        # Jab koi Join kare
-        if update.status == ParticipantStatus.JOINED:
+        # Agar status mein 'join' word hai ya status code 1 hai
+        if "join" in status or status == "participant_status.joined" or status == "1":
             await app.send_message(
                 chat_id, 
-                f"🔔 **VC Join Update**\n\nUser: {mention}\nID: `{user_id}` ne VC join kiya."
+                f"🔔 **VC Update**\n\nUser: {mention}\nID: `{user_id}` ne VC join kiya."
             )
 
-        # Jab koi Leave kare
-        elif update.status == ParticipantStatus.LEFT:
+        # Agar status mein 'leave' ya 'left' word hai ya status code 2 hai
+        elif "left" in status or "leave" in status or status == "participant_status.left" or status == "2":
             await app.send_message(
                 chat_id, 
-                f"🔕 **VC Leave Update**\n\nUser: {mention}\nID: `{user_id}` ne VC leave kiya."
+                f"🔕 **VC Update**\n\nUser: {mention}\nID: `{user_id}` ne VC leave kiya."
             )
 
 # 3. Commands
@@ -49,7 +52,7 @@ async def start_vc_monitor(client: Client, message: Message):
         {"$set": {"status": "on"}},
         upsert=True
     )
-    await message.reply_text(f"✅ **VC Monitoring ON kar di gayi hai.**")
+    await message.reply_text("✅ **VC Monitoring ON ho gayi!**")
 
 @app.on_message(filters.command(["vcoff", "checkvcoff"]) & filters.group)
 async def stop_vc_monitor(client: Client, message: Message):
@@ -59,4 +62,4 @@ async def stop_vc_monitor(client: Client, message: Message):
         {"$set": {"status": "off"}},
         upsert=True
     )
-    await message.reply_text(f"❌ **VC Monitoring OFF kar di gayi hai.**")
+    await message.reply_text("❌ **VC Monitoring OFF ho gayi!**")
