@@ -1,64 +1,51 @@
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pytgcalls import PyTgCalls
-from pytgcalls.types import Update, CallParticipantUpdated # UserJoined/UserLeft ki jagah ye use karein
-from pytgcalls.types.enums import ParticipantStatus # Status check karne ke liye
-from VIPMUSIC.core.mongo import mongodb 
+from pytgcalls.types import Update, UserJoined, UserLeft
+from pytgcalls.types.enums import UpdateType
+from VIPMUSIC.core.mongo import mongodb  # MongoDB connection
 from VIPMUSIC import app
 
-# Pytgcalls initialize (Aapki main file mein already ho sakta hai)
-pytgcalls = PyTgCalls(app)
+# Function to check if monitoring is enabled for a group
+def is_monitoring_enabled(chat_id):
+    status = mongodb.vc_monitoring.find_one({"chat_id": chat_id})
+    return status and status["status"] == "on"
 
-# Function: Check monitoring status
-async def is_monitoring_enabled(chat_id):
-    status = await mongodb.vc_monitoring.find_one({"chat_id": chat_id})
-    return status and status.get("status") == "on"
-
-# Naya Event Handler
+# Event to monitor VC join/leave
 @pytgcalls.on_update()
 async def vc_participant_update(client, update: Update):
-    # Check karein agar update participant ke baare mein hai
-    if not isinstance(update, CallParticipantUpdated):
-        return
-
     chat_id = update.chat_id
-    
-    if await is_monitoring_enabled(chat_id):
-        user_id = update.user_id
-        mention = f"[{user_id}](tg://user?id={user_id})"
+    if is_monitoring_enabled(chat_id):  # Only proceed if monitoring is enabled for this group
+        if update.update_type == UpdateType.PARTICIPANT_JOINED and isinstance(update, UserJoined):
+            user_id = update.user_id
+            mention = f"[User](tg://user?id={user_id})"
+            await app.send_message(chat_id, f"{mention} ne VC join kiya. User ID: {user_id}")
 
-        # Jab koi Join kare
-        if update.status == ParticipantStatus.JOINED:
-            await app.send_message(
-                chat_id, 
-                f"🔔 **VC Join Update**\n\nUser: {mention}\nID: `{user_id}` ne VC join kiya."
-            )
+        elif update.update_type == UpdateType.PARTICIPANT_LEFT and isinstance(update, UserLeft):
+            user_id = update.user_id
+            mention = f"[User](tg://user?id={user_id})"
+            await app.send_message(chat_id, f"{mention} ne VC leave kiya. User ID: {user_id}")
 
-        # Jab koi Leave kare
-        elif update.status == ParticipantStatus.LEFT:
-            await app.send_message(
-                chat_id, 
-                f"🔕 **VC Leave Update**\n\nUser: {mention}\nID: `{user_id}` ne VC leave kiya."
-            )
-
-# Command to Start
-@app.on_message(filters.command(["vcon", "checkvcon"]) & filters.group)
+# Command to start VC monitoring and update status in database
+@app.on_message(filters.command("checkvc on") & filters.group)
 async def start_vc_monitor(client: Client, message: Message):
     chat_id = message.chat.id
-    await mongodb.vc_monitoring.update_one(
+    mongodb.vc_monitoring.update_one(
         {"chat_id": chat_id},
         {"$set": {"status": "on"}},
         upsert=True
     )
-    await message.reply_text(f"✅ **VC Monitoring ON kar di gayi hai.**")
+    await pytgcalls.start(chat_id)
+    await message.reply("VC monitoring started. Ab jo bhi VC join ya leave karega, uska update yaha milega.")
 
-# Command to Stop
-@app.on_message(filters.command(["vcoff", "checkvcoff"]) & filters.group)
+# Command to stop VC monitoring and update status in database
+@app.on_message(filters.command("checkvcoff") & filters.group)
 async def stop_vc_monitor(client: Client, message: Message):
     chat_id = message.chat.id
-    await mongodb.vc_monitoring.update_one(
+    mongodb.vc_monitoring.update_one(
         {"chat_id": chat_id},
-        {"$set": {"status": "off"}},
-        upsert=True
+        {"$set": {"status": "off"}}
     )
-    await message.reply_text(f"❌ **VC Monitoring OFF kar di gayi hai.**")
+    await pytgcalls.leave_group_call(chat_id)
+    await message.reply("VC monitoring stopped.")
+                                                                              
