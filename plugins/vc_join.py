@@ -1,7 +1,7 @@
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pytgcalls import PyTgCalls
-from pytgcalls.types import Update, UpdateType  # Yaha change kiya hai
+from pytgcalls.types import UpdateType  # Yaha change kiya hai
 from VIPMUSIC.core.mongo import mongodb
 from VIPMUSIC import app
 # Check karein aapka call instance kis naam se hai (VIP ya kuch aur)
