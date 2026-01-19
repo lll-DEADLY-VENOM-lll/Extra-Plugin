@@ -12,7 +12,7 @@ async def is_monitoring_enabled(chat_id):
 
 # 2. Join/Leave detect karne wala function
 # VIP-MUSIC mein aksar 'call' attribute ke andar PyTgCalls hota hai
-@VIP.call.on_update()
+@VIP.calls.on_update()
 async def vc_participant_update(client, update: Update):
     # Chat ID nikalna
     chat_id = getattr(update, "chat_id", None)
