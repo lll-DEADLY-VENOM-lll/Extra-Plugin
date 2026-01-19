@@ -2,50 +2,52 @@ from pyrogram import Client, filters
 from pyrogram.types import Message
 from pytgcalls import PyTgCalls
 from pytgcalls.types import Update, UserJoined, UserLeft
-from pytgcalls.types.enums import UpdateType
-from VIPMUSIC.core.mongo import mongodb  # MongoDB connection
+from VIPMUSIC.core.mongo import mongodb 
 from VIPMUSIC import app
 
-# Function to check if monitoring is enabled for a group
-def is_monitoring_enabled(chat_id):
-    status = mongodb.vc_monitoring.find_one({"chat_id": chat_id})
-    return status and status["status"] == "on"
+# 1. Pytgcalls ko app ke saath connect kiya
+pytgcalls = PyTgCalls(app)
 
-# Event to monitor VC join/leave
+# 2. Check karne ke liye ki monitoring ON hai ya nahi
+async def is_monitoring_enabled(chat_id):
+    status = await mongodb.vc_monitoring.find_one({"chat_id": chat_id})
+    return status and status.get("status") == "on"
+
+# 3. Join/Leave detect karne wala function
 @pytgcalls.on_update()
 async def vc_participant_update(client, update: Update):
     chat_id = update.chat_id
-    if is_monitoring_enabled(chat_id):  # Only proceed if monitoring is enabled for this group
-        if update.update_type == UpdateType.PARTICIPANT_JOINED and isinstance(update, UserJoined):
+    
+    # Check status from DB
+    if await is_monitoring_enabled(chat_id):
+        if isinstance(update, UserJoined):
             user_id = update.user_id
-            mention = f"[User](tg://user?id={user_id})"
-            await app.send_message(chat_id, f"{mention} ne VC join kiya. User ID: {user_id}")
+            mention = f"[{user_id}](tg://user?id={user_id})"
+            await app.send_message(chat_id, f"🔔 {mention} ne VC join kiya hai.")
 
-        elif update.update_type == UpdateType.PARTICIPANT_LEFT and isinstance(update, UserLeft):
+        elif isinstance(update, UserLeft):
             user_id = update.user_id
-            mention = f"[User](tg://user?id={user_id})"
-            await app.send_message(chat_id, f"{mention} ne VC leave kiya. User ID: {user_id}")
+            mention = f"[{user_id}](tg://user?id={user_id})"
+            await app.send_message(chat_id, f"🔕 {mention} ne VC leave kar diya.")
 
-# Command to start VC monitoring and update status in database
-@app.on_message(filters.command("checkvc on") & filters.group)
+# 4. Monitoring ON karne ka command
+@app.on_message(filters.command("vcon") & filters.group)
 async def start_vc_monitor(client: Client, message: Message):
     chat_id = message.chat.id
-    mongodb.vc_monitoring.update_one(
+    await mongodb.vc_monitoring.update_one(
         {"chat_id": chat_id},
         {"$set": {"status": "on"}},
         upsert=True
     )
-    await pytgcalls.start(chat_id)
-    await message.reply("VC monitoring started. Ab jo bhi VC join ya leave karega, uska update yaha milega.")
+    await message.reply("✅ VC monitoring shuru ho gayi hai!")
 
-# Command to stop VC monitoring and update status in database
-@app.on_message(filters.command("checkvcoff") & filters.group)
+# 5. Monitoring OFF karne ka command
+@app.on_message(filters.command("vcoff") & filters.group)
 async def stop_vc_monitor(client: Client, message: Message):
     chat_id = message.chat.id
-    mongodb.vc_monitoring.update_one(
+    await mongodb.vc_monitoring.update_one(
         {"chat_id": chat_id},
-        {"$set": {"status": "off"}}
+        {"$set": {"status": "off"}},
+        upsert=True
     )
-    await pytgcalls.leave_group_call(chat_id)
-    await message.reply("VC monitoring stopped.")
-
+    await message.reply("❌ VC monitoring band kar di gayi hai.")
