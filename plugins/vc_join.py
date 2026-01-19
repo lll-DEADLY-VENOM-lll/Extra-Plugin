@@ -11,8 +11,8 @@ async def is_monitoring_enabled(chat_id):
     return status and status.get("status") == "on"
 
 # 2. Join/Leave detect karne wala function
-# Yaha humne VIP.app.on_update() use kiya hai
-@VIP.app.on_update()
+# VIP-MUSIC mein aksar 'call' attribute ke andar PyTgCalls hota hai
+@VIP.call.on_update()
 async def vc_participant_update(client, update: Update):
     # Chat ID nikalna
     chat_id = getattr(update, "chat_id", None)
@@ -25,33 +25,33 @@ async def vc_participant_update(client, update: Update):
         if not user_id:
             return
 
-        # Status ko string mein convert karke check karna (Sabhi versions ke liye)
+        # Status check (Joins/Leaves)
         status = str(getattr(update, "status", "")).lower()
         mention = f"[{user_id}](tg://user?id={user_id})"
 
-        # Join check
+        # Join detection
         if "join" in status or status == "1":
             try:
                 await app.send_message(
                     chat_id, 
                     f"🔔 **VC Update**\n\nUser: {mention}\nID: `{user_id}` ne VC join kiya."
                 )
-            except Exception:
+            except:
                 pass
 
-        # Leave check
+        # Leave detection
         elif "left" in status or "leave" in status or status == "2":
             try:
                 await app.send_message(
                     chat_id, 
                     f"🔕 **VC Update**\n\nUser: {mention}\nID: `{user_id}` ne VC leave kiya."
                 )
-            except Exception:
+            except:
                 pass
 
 # 3. Commands
 @app.on_message(filters.command(["vcon", "checkvcon"]) & filters.group)
-async def start_vc_monitor(client: Client, message: Message):
+async def start_vc_monitor(client, message):
     chat_id = message.chat.id
     await mongodb.vc_monitoring.update_one(
         {"chat_id": chat_id},
@@ -61,7 +61,7 @@ async def start_vc_monitor(client: Client, message: Message):
     await message.reply_text("✅ **VC Monitoring ON ho gayi hai!**")
 
 @app.on_message(filters.command(["vcoff", "checkvcoff"]) & filters.group)
-async def stop_vc_monitor(client: Client, message: Message):
+async def stop_vc_monitor(client, message):
     chat_id = message.chat.id
     await mongodb.vc_monitoring.update_one(
         {"chat_id": chat_id},
