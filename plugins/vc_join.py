@@ -1,12 +1,10 @@
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pytgcalls import PyTgCalls
-from pytgcalls.types import Update
-# 1.2.9 mein UpdateType yaha hota hai
-from pytgcalls.types.enums import UpdateType 
+from pytgcalls.types import Update, UpdateType  # Yaha change kiya hai
 from VIPMUSIC.core.mongo import mongodb
 from VIPMUSIC import app
-# Apne instance ka sahi import check karein
+# Check karein aapka call instance kis naam se hai (VIP ya kuch aur)
 from VIPMUSIC.core.call import VIP as pytgcalls 
 
 # Function to check monitoring status
@@ -14,16 +12,16 @@ async def is_monitoring_enabled(chat_id):
     status = await mongodb.vc_monitoring.find_one({"chat_id": chat_id})
     return status and status.get("status") == "on"
 
-# Event handler
+# Event handler for VC updates
 @pytgcalls.on_update()
 async def vc_participant_update(client, update: Update):
-    # Version 1.2.9 mein update_type aise check hota hai
+    # Version 1.2.9 mein UpdateType.PARTICIPANT_JOINED use hota hai
     if update.update_type == UpdateType.PARTICIPANT_JOINED:
         chat_id = update.chat_id
+        
         if not await is_monitoring_enabled(chat_id):
             return
         
-        # 1.2.9 mein user_id update object mein directly mil jata hai
         user_id = update.user_id
         mention = f"[{user_id}](tg://user?id={user_id})"
         
@@ -34,6 +32,7 @@ async def vc_participant_update(client, update: Update):
 
     elif update.update_type == UpdateType.PARTICIPANT_LEFT:
         chat_id = update.chat_id
+        
         if not await is_monitoring_enabled(chat_id):
             return
             
@@ -60,11 +59,11 @@ async def vc_monitor_toggle(client: Client, message: Message):
             {"$set": {"status": "on"}},
             upsert=True
         )
-        await message.reply("✅ **VC Monitoring ON**")
+        await message.reply("✅ **VC Monitoring ON** ho gayi hai.")
     elif state == "off":
         await mongodb.vc_monitoring.update_one(
             {"chat_id": chat_id},
             {"$set": {"status": "off"}},
             upsert=True
         )
-        await message.reply("❌ **VC Monitoring OFF**")
+        await message.reply("❌ **VC Monitoring OFF** ho gayi hai.")
