@@ -1,160 +1,161 @@
-import asyncio
-import re
-from datetime import datetime
+import os
+from unidecode import unidecode
+from PIL import ImageDraw, Image, ImageFont, ImageChops
+from pyrogram import *
+from pyrogram.types import *
 from logging import getLogger
-from time import time
 
-from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFont
-from pyrogram import enums, filters
-from pyrogram.types import (ChatMemberUpdated, InlineKeyboardButton,
-                            InlineKeyboardMarkup)
-from pymongo import MongoClient
-from pytz import timezone
-
-import config
-from config import MONGO_DB_URI
+# VIPMUSIC Imports
+from VIPMUSIC import LOGGER
 from VIPMUSIC import app
+from VIPMUSIC.misc import SUDOERS
+from VIPMUSIC.utils.database import db
 
-# --- CONFIG & DATABASE ---
+try:
+    wlcm = db.welcome
+except:
+    from VIPMUSIC.utils.database import welcome as wlcm
+
 LOGGER = getLogger(__name__)
-user_last_message_time = {}
-user_command_count = {}
-SPAM_THRESHOLD = 2
-SPAM_WINDOW_SECONDS = 5
-
-welcomedb = MongoClient(MONGO_DB_URI)
-status_db = welcomedb.welcome_status_db.status
-
-# --- HELPERS ---
-def convert_to_small_caps(text):
-    mapping = str.maketrans(
-        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
-        "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘϙʀꜱᴛᴜᴠᴡxʏᴢᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘϙʀꜱᴛᴜᴠᴡxʏᴢ",
-    )
-    return text.translate(mapping)
 
 class temp:
+    ME = None
+    CURRENT = 2
+    CANCEL = False
     MELCOW = {}
+    U_NAME = None
+    B_NAME = None
 
-def circle(pfp, size=(80, 80)):
-    pfp = pfp.resize(size, Image.Resampling.LANCZOS).convert("RGBA")
-    mask = Image.new("L", size, 0)
+def circle(pfp, size=(450, 450)):
+    pfp = pfp.resize(size, Image.LANCZOS).convert("RGBA")
+    bigsize = (pfp.size[0] * 3, pfp.size[1] * 3)
+    mask = Image.new("L", bigsize, 0)
     draw = ImageDraw.Draw(mask)
-    draw.ellipse((0, 0) + size, fill=255)
+    draw.ellipse((0, 0) + bigsize, fill=255)
+    mask = mask.resize(pfp.size, Image.LANCZOS)
+    mask = ImageChops.darker(mask, pfp.split()[-1])
     pfp.putalpha(mask)
+    return pfp
+
+def welcomepic(pic, user, chat, id, uname):
+    background = Image.open("VIPMUSIC/assets/welcome.png")
+    pfp = Image.open(pic).convert("RGBA")
+    pfp = circle(pfp)
+    pfp = pfp.resize((450, 450)) 
+    draw = ImageDraw.Draw(background)
     
-    # Simple Aesthetic Border
-    border = Image.new("RGBA", (size[0] + 6, size[1] + 6), (0, 0, 0, 0))
-    draw_b = ImageDraw.Draw(border)
-    draw_b.ellipse((0, 0, size[0] + 6, size[1] + 6), outline="#FFFFFF", width=3)
-    border.paste(pfp, (3, 3), pfp)
-    return border
+    # Text drawing logic with VIP Font
+    font = ImageFont.truetype('VIPMUSIC/assets/font.ttf', size=45)
+    
+    draw.text((65, 250), f'NAME : {unidecode(user)}', fill="white", font=font)
+    draw.text((65, 340), f'ID : {id}', fill="white", font=font)
+    draw.text((65, 430), f"USERNAME : {uname}", fill="white", font=font)
+    
+    pfp_position = (767, 133)  
+    background.paste(pfp, pfp_position, pfp)  
+    
+    output_path = f"downloads/welcome#{id}.png"
+    background.save(output_path)
+    return output_path
 
-def welcomepic(user_id, user_names, chat_name, user_photo):
-    try:
-        background = Image.open("assets/wel2.png")
-        user_img = Image.open(user_photo).convert("RGBA")
-        user_img = circle(user_img, size=(230, 230))
-        
-        # Background pe paste karna (Aapke coordinates ke hisab se)
-        background.paste(user_img, (827, 260), user_img)
-        
-        draw = ImageDraw.Draw(background)
-        font = ImageFont.truetype("assets/font.ttf", size=35)
-        
-        # Image pe text writing
-        draw.text((510, 520), f"NAME: {user_names[:15]}", fill="white", font=font)
-        draw.text((510, 570), f"ID: {user_id}", fill="white", font=font)
-
-        path = f"downloads/welcome#{user_id}.png"
-        background.save(path)
-        return path
-    except Exception as e:
-        LOGGER.error(e)
-        return "assets/wel2.png"
-
-# --- DB FUNCTIONS ---
-async def get_welcome_status(chat_id):
-    status = status_db.find_one({"chat_id": chat_id})
-    return status.get("welcome", "on") if status else "on"
-
-async def set_welcome_status(chat_id, state):
-    status_db.update_one({"chat_id": chat_id}, {"$set": {"welcome": state}}, upsert=True)
-
-# --- COMMANDS ---
 @app.on_message(filters.command("welcome") & ~filters.private)
 async def auto_state(_, message):
-    user_id = message.from_user.id
-    if message.from_user.id in user_last_message_time:
-        if time() - user_last_message_time[user_id] < SPAM_WINDOW_SECONDS:
-            return
-    user_last_message_time[user_id] = time()
+    usage = "<b>❖ ᴜsᴀɢᴇ ➥</b> /welcome [on|off]"
+    if len(message.command) == 1:
+        return await message.reply_text(usage)
 
-    if len(message.command) < 2:
-        return await message.reply_text("**ᴜsᴀɢᴇ:**\n**/welcome [on|off]**")
-
+    chat_id = message.chat.id
     user = await app.get_chat_member(message.chat.id, message.from_user.id)
-    if user.status not in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
-        return await message.reply_text("**ᴏɴʟʏ ᴀᴅᴍɪɴs ᴄᴀɴ ᴜsᴇ ᴛʜɪs!**")
 
-    state = message.command[1].lower()
-    if state in ["on", "off"]:
-        await set_welcome_status(message.chat.id, state)
-        await message.reply_text(f"**ᴡᴇʟᴄᴏᴍᴇ ɴᴏᴛɪғɪᴄᴀᴛɪᴏɴ sᴇᴛ ᴛᴏ {state.upper()}**")
+    if user.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER) or message.from_user.id in SUDOERS:
+        A = await wlcm.find_one({"chat_id": chat_id})
+        state = message.text.split(None, 1)[1].strip().lower()
+
+        if state == "on":
+            if A and not A.get("disabled", False):
+                return await message.reply_text("✨ **ᴡᴇʟᴄᴏᴍᴇ ᴍᴏᴅᴜʟᴇ ɪs ᴀʟʀᴇᴀᴅʏ ᴀᴄᴛɪᴠᴇ!**")
+            await wlcm.update_one({"chat_id": chat_id}, {"$set": {"disabled": False}}, upsert=True)
+            await message.reply_text(f"✅ **ᴇɴᴀʙʟᴇᴅ ᴘʀᴇᴍɪᴜᴍ ᴡᴇʟᴄᴏᴍᴇ ɪɴ {message.chat.title}**")
+
+        elif state == "off":
+            if A and A.get("disabled", False):
+                return await message.reply_text("✨ **ᴡᴇʟᴄᴏᴍᴇ ᴍᴏᴅᴜʟᴇ ɪs ᴀʟʀᴇᴀᴅʏ ᴅɪsᴀʙʟᴇᴅ!**")
+            await wlcm.update_one({"chat_id": chat_id}, {"$set": {"disabled": True}}, upsert=True)
+            await message.reply_text(f"📴 **ᴅɪsᴀʙʟᴇᴅ ᴘʀᴇᴍɪᴜᴍ ᴡᴇʟᴄᴏᴍᴇ ɪɴ {message.chat.title}**")
+        else:
+            await message.reply_text(usage)
     else:
-        await message.reply_text("**ᴜsᴀɢᴇ: /welcome [on|off]**")
+        await message.reply("❌ **ʏᴏᴜ ᴀʀᴇ ɴᴏᴛ ᴀɴ ᴀᴅᴍɪɴ!**")
 
-# --- MAIN HANDLER ---
-@app.on_chat_member_updated(filters.group, group=-4)
-async def greet_new_members(_, member: ChatMemberUpdated):
-    if not member.new_chat_member or member.old_chat_member:
-        return
-        
+@app.on_chat_member_updated(filters.group, group=-3)
+async def greet_group(_, member: ChatMemberUpdated):
     chat_id = member.chat.id
-    if await get_welcome_status(chat_id) == "off":
+    A = await wlcm.find_one({"chat_id": chat_id})
+
+    if A and A.get("disabled", False):  
         return
 
-    user = member.new_chat_member.user
+    if (
+        not member.new_chat_member
+        or member.new_chat_member.status in {"banned", "left", "restricted"}
+        or member.old_chat_member
+    ):
+        return
+
+    user = member.new_chat_member.user if member.new_chat_member else member.from_user
     count = await app.get_chat_members_count(chat_id)
     
-    # Time logic
-    ist = timezone('Asia/Kolkata')
-    joined_time = datetime.now(ist).strftime('%I:%M %p')
-
-    # Profile Photo logic
     try:
-        user_photo = await app.download_media(user.photo.big_file_id, file_name=f"pp{user.id}.png")
-    except:
-        user_photo = "assets/nodp.png"
+        pic = await app.download_media(
+            user.photo.big_file_id, file_name=f"pp{user.id}.png"
+        )
+    except Exception:
+        pic = "VIPMUSIC/assets/upic.png"
 
-    # Photo generate
-    welcomeimg = welcomepic(user.id, user.first_name, member.chat.title, user_photo)
+    # Anti-Spam: Delete previous welcome
+    if (temp.MELCOW).get(f"welcome-{member.chat.id}") is not None:
+        try:
+            await temp.MELCOW[f"welcome-{member.chat.id}"].delete()
+        except:
+            pass
 
-    # --- UNIQUE MINIMALIST CAPTION ---
-    # Tree style: ┌ ├ └
-    cap = (
-        f"<b>⌯ {convert_to_small_caps('ɴᴇᴡ ᴇɴᴛʀʏ')} ⌯</b>\n"
-        f"<b>{user.mention}</b>\n\n"
-        f"<b>┌ ɪᴅ :</b> <code>{user.id}</code>\n"
-        f"<b>├ ᴄᴏᴜɴᴛ :</b> {count}\n"
-        f"<b>├ ᴛɪᴍᴇ :</b> {joined_time}\n"
-        f"<b>└ ɢʀᴏᴜᴘ :</b> {convert_to_small_caps(member.chat.title[:15])}\n\n"
-        f"<b>⌬ {convert_to_small_caps('ᴘᴏᴡᴇʀᴇᴅ ʙʏ')} {app.mention}</b>"
-    )
+    try:
+        welcomeimg = welcomepic(
+            pic, user.first_name, member.chat.title, user.id, user.username
+        )
+        
+        # --- ULTRA PREMIUM CAPTION ---
+        caption = f"""
+✨ ─────「 **ᴡᴇʟᴄᴏᴍᴇ** 」───── ✨
 
-    reply_markup = InlineKeyboardMarkup(
-        [[InlineKeyboardButton(f"✥ {convert_to_small_caps('ᴀᴅᴅ ᴍᴇ')} ✥", url=f"https://t.me/{app.username}?startgroup=true")]]
-    )
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┣ ★ **ɴᴀᴍᴇ :** {user.mention}
+┣ ★ **ᴜsᴇʀ ɪᴅ :** ` {user.id} `
+┣ ★ **ᴜsᴇʀɴᴀᴍᴇ :** @{user.username if user.username else "ɴᴏᴛ sᴇᴛ"}
+┣ ★ **ᴍᴇᴍʙᴇʀ ɴᴏ. :** {count}
+┗━━━━━━━━━━━━━━━━━━━━━━━━━━┛
 
-    # Delete old welcome if exists
-    old_msg = temp.MELCOW.get(f"welcome-{chat_id}")
-    if old_msg:
-        try: await old_msg.delete()
-        except: pass
+🌹 **ᴡᴇ ᴀʀᴇ ʜᴀᴘᴘʏ ᴛᴏ ʜᴀᴠᴇ ʏᴏᴜ ɪɴ {member.chat.title}! ʜᴏᴘᴇ ʏᴏᴜ'ʟʟ ᴇɴᴊᴏʏ ᴛʜᴇ sᴛᴀʏ.**
+"""
+        
+        temp.MELCOW[f"welcome-{member.chat.id}"] = await app.send_photo(
+            member.chat.id,
+            photo=welcomeimg,
+            caption=caption,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✨ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘ ✨", url=f"https://t.me/{app.username}?startgroup=true")],
+                [InlineKeyboardButton("👑 ᴏᴡɴᴇʀ", url=f"https://t.me/DevilsHeavenMF"), 
+                 InlineKeyboardButton("📢 ᴜᴘᴅᴀᴛᴇs", url=f"https://t.me/TheTeamVIP")]
+            ]),
+        )
 
-    # Send new welcome
-    msg = await app.send_photo(chat_id, photo=welcomeimg, caption=cap, reply_markup=reply_markup)
-    temp.MELCOW[f"welcome-{chat_id}"] = msg
+    except Exception as e:
+        LOGGER.error(e)
 
-__MODULE__ = "Wᴇʟᴄᴏᴍᴇ"
-__HELP__ = "/welcome [on/off] - To enable/disable welcome messages."
+    # Cleanup Files
+    try:
+        os.remove(f"downloads/welcome#{user.id}.png")
+        if pic != "VIPMUSIC/assets/upic.png":
+            os.remove(pic)
+    except Exception:
+        pass
