@@ -8,124 +8,117 @@ from config import MONGO_DB_URI
 from pyrogram.enums import ChatMembersFilter
 from pyrogram.errors import (
     ChatAdminRequired,
-    InviteRequestSent,
-    UserAlreadyParticipant,
     UserNotParticipant,
+    UsernameInvalid,
+    PeerIdInvalid,
 )
 
+# Database Setup
 fsubdb = MongoClient(MONGO_DB_URI)
 forcesub_collection = fsubdb.status_db.status
 
+# --- SET FORCE SUB COMMAND ---
 @app.on_message(filters.command(["fsub", "forcesub"]) & filters.group)
 async def set_forcesub(client: Client, message: Message):
-    if not message.from_user: # Anonymous admin check
+    if not message.from_user: # Anonymous Admin Check
         return
 
     chat_id = message.chat.id
     user_id = message.from_user.id
 
+    # Check if user is Admin or Sudo
     try:
         member = await client.get_chat_member(chat_id, user_id)
     except Exception:
         return
 
-    if not (member.status in ["creator", "administrator"] or user_id in SUDOERS):
+    if not (member.status.name in ["OWNER", "ADMINISTRATOR"] or user_id in SUDOERS):
         return await message.reply_text("**ᴏɴʟʏ ɢʀᴏᴜᴘ ᴏᴡɴᴇʀs ᴏʀ sᴜᴅᴏᴇʀs ᴄᴀɴ ᴜsᴇ ᴛʜɪs ᴄᴏᴍᴍᴀɴᴅ.**")
 
+    # Disable Fsub
     if len(message.command) == 2 and message.command[1].lower() in ["off", "disable"]:
         forcesub_collection.delete_one({"chat_id": chat_id})
-        return await message.reply_text("**ғᴏʀᴄᴇ sᴜʙsᴄʀɪᴘᴛɪᴏɴ ʜᴀs ʙᴇᴇɴ ᴅɪsᴀʙʟᴇᴅ ғᴏʀ ᴛʜɪs ɢʀᴏᴜᴘ.**")
+        return await message.reply_text("**✅ ғᴏʀᴄᴇ sᴜʙsᴄʀɪᴘᴛɪᴏɴ ʜᴀs ʙᴇᴇɴ ᴅɪsᴀʙʟᴇᴅ ғᴏʀ ᴛʜɪs ɢʀᴏᴜᴘ.**")
 
     if len(message.command) != 2:
-        return await message.reply_text("**ᴜsᴀɢᴇ: /ғsᴜʙ <ᴄʜᴀɴɴᴇʟ ᴜsᴇʀɴᴀᴍᴇ ᴏʀ ɪᴅ> ᴏʀ /ғsᴜʙ ᴏғғ ᴛᴏ ᴅɪsᴀʙʟᴇ**")
+        return await message.reply_text("**ᴜsᴀɢᴇ:**\n`/fsub @ChannelUsername`\n`/fsub -100123456789`\n`/fsub off` **ᴛᴏ ᴅɪsᴀʙʟᴇ**")
 
     channel_input = message.command[1]
+
+    # Clean Input (Link ko username mein convert karna)
+    if "t.me/" in channel_input:
+        channel_input = channel_input.split("t.me/")[1]
+    if channel_input.startswith("@"):
+        channel_input = channel_input.replace("@", "")
+    
+    try:
+        # Check if it's a Chat ID
+        if channel_input.startswith("-100"):
+            channel_input = int(channel_input)
+    except ValueError:
+        pass
 
     try:
         channel_info = await client.get_chat(channel_input)
         channel_id = channel_info.id
         channel_title = channel_info.title
         
+        # Invite link generate karna
         try:
             channel_link = await app.export_chat_invite_link(channel_id)
         except:
-            channel_link = f"https://t.me/{channel_info.username}" if channel_info.username else "No Link"
+            if channel_info.username:
+                channel_link = f"https://t.me/{channel_info.username}"
+            else:
+                return await message.reply_text("**❌ ᴘʟᴇᴀsᴇ ᴍᴀᴋᴇ ᴍᴇ ᴀᴅᴍɪɴ ɪɴ ʏᴏᴜʀ ᴄʜᴀɴɴᴇʟ ᴡɪᴛʜ 'ɪɴᴠɪᴛᴇ ᴜsᴇʀs' ᴘᴇʀᴍɪssɪᴏɴ.**")
 
-        channel_username = f"{channel_info.username}" if channel_info.username else channel_link
-        channel_members_count = channel_info.members_count
+        channel_username = channel_info.username if channel_info.username else channel_id
 
-        bot_id = (await client.get_me()).id
+        # Bot Admin check
+        bot = await client.get_me()
         bot_is_admin = False
-
-        async for admin in app.get_chat_members(channel_id, filter=ChatMembersFilter.ADMINISTRATORS):
-            if admin.user.id == bot_id:
+        async for admin in client.get_chat_members(channel_id, filter=ChatMembersFilter.ADMINISTRATORS):
+            if admin.user.id == bot.id:
                 bot_is_admin = True
                 break
 
         if not bot_is_admin:
-            return await message.reply_photo(
-                photo="https://envs.sh/TnZ.jpg",
-                caption=("**🚫 I'ᴍ ɴᴏᴛ ᴀɴ ᴀᴅᴍɪɴ ɪɴ ᴛʜɪs ᴄʜᴀɴɴᴇʟ.**\n\n"
-                         "**➲ ᴘʟᴇᴀsᴇ ᴍᴀᴋᴇ ᴍᴇ ᴀɴ ᴀᴅᴍɪɴ ᴡɪᴛʜ:**\n\n"
-                         "**➥ Iɴᴠɪᴛᴇ Nᴇᴡ Mᴇᴍʙᴇʀs**\n\n"
-                         "🛠️ **Tʜᴇɴ ᴜsᴇ /ғsᴜʙ <ᴄʜᴀɴɴᴇʟ ᴜsᴇʀɴᴀᴍᴇ> ᴛᴏ sᴇᴛ ғᴏʀᴄᴇ sᴜʙsᴄʀɪᴘᴛɪᴏɴ.**"),
-                reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("๏ ᴀᴅᴅ ᴍᴇ ɪɴ ᴄʜᴀɴɴᴇʟ ๏", url=f"https://t.me/{app.username}?startchannel=s&admin=invite_users+manage_video_chats")]]
-                )
-            )
+            return await message.reply_text(f"**🚫 ɪ'ᴍ ɴᴏᴛ ᴀᴅᴍɪɴ ɪɴ [{channel_title}]({channel_link})**\nᴘʟᴇᴀsᴇ ᴍᴀᴋᴇ ᴍᴇ ᴀᴅᴍɪɴ ᴛʜᴇʀᴇ ᴛᴏ ᴇɴᴀʙʟᴇ ғsᴜʙ.")
 
+        # Save to DB
         forcesub_collection.update_one(
             {"chat_id": chat_id},
-            {"$set": {"channel_id": channel_id, "channel_username": channel_username}},
+            {"$set": {"channel_id": channel_id, "channel_username": channel_username, "channel_title": channel_title, "channel_link": channel_link}},
             upsert=True
         )
 
-        set_by_user = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
+        await message.reply_text(f"**✅ ғᴏʀᴄᴇ sᴜʙsᴄʀɪᴘᴛɪᴏɴ sᴇᴛ sᴜᴄᴄᴇssғᴜʟʟʏ!**\n\n**ᴄʜᴀɴɴᴇʟ:** [{channel_title}]({channel_link})\n**ɪᴅ:** `{channel_id}`")
 
-        await message.reply_photo(
-            photo="https://envs.sh/Tn_.jpg",
-            caption=(
-                f"**🎉 ғᴏʀᴄᴇ sᴜʙsᴄʀɪᴘᴛɪᴏɴ sᴇᴛ ᴛᴏ** [{channel_title}]({channel_username}) **ғᴏʀ ᴛʜɪs ɢʀᴏᴜᴘ.**\n\n"
-                f"**🆔 ᴄʜᴀɴɴᴇʟ ɪᴅ:** `{channel_id}`\n"
-                f"**🖇️ ᴄʜᴀɴɴᴇʟ ʟɪɴᴋ:** [ɢᴇᴛ ʟɪɴᴋ]({channel_link})\n"
-                f"**📊 ᴍᴇᴍʙᴇʀ ᴄᴏᴜɴᴛ:** {channel_members_count}\n"
-                f"**👤 sᴇᴛ ʙʏ:** {set_by_user}"
-            ),
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("๏ ᴄʟᴏsᴇ ๏", callback_data="close_force_sub")]]
-            )
-        )
-
+    except (UsernameInvalid, PeerIdInvalid):
+        await message.reply_text("**❌ ɪɴᴠᴀʟɪᴅ ᴜsᴇʀɴᴀᴍᴇ ᴏʀ ɪᴅ. ᴘʟᴇᴀsᴇ ɢɪᴠᴇ ᴀ ᴠᴀʟɪᴅ ᴘᴜʙʟɪᴄ ᴄʜᴀɴɴᴇʟ.**")
     except Exception as e:
         await message.reply_text(f"**Error:** `{e}`")
 
-@app.on_callback_query(filters.regex("close_force_sub"))
-async def close_force_sub(client: Client, callback_query: CallbackQuery):
-    await callback_query.answer("ᴄʟᴏsᴇᴅ!")
-    await callback_query.message.delete()
-    
-
+# --- CHECK MEMBERSHIP FUNCTION ---
 async def check_forcesub(client: Client, message: Message):
-    # Fix: Agar message user ki taraf se nahi hai toh skip karein
     if not message.from_user:
         return True
 
     chat_id = message.chat.id
     user_id = message.from_user.id
 
+    if user_id in SUDOERS:
+        return True
+
     forcesub_data = forcesub_collection.find_one({"chat_id": chat_id})
     if not forcesub_data:
         return True
 
     channel_id = forcesub_data["channel_id"]
-    channel_username = forcesub_data["channel_username"]
-
-    # Sudoers ko check se exclude karein
-    if user_id in SUDOERS:
-        return True
+    channel_link = forcesub_data.get("channel_link", "https://t.me/Telegram")
 
     try:
-        user_member = await app.get_chat_member(channel_id, user_id)
+        await client.get_chat_member(channel_id, user_id)
         return True
     except UserNotParticipant:
         try:
@@ -133,34 +126,28 @@ async def check_forcesub(client: Client, message: Message):
         except:
             pass
 
-        if "t.me" in str(channel_username):
-            channel_url = channel_username
-        else:
-            channel_url = f"https://t.me/{channel_username}"
-
-        user_mention = message.from_user.mention if message.from_user else "User"
-        
+        user_mention = message.from_user.mention
         await message.reply_photo(
             photo="https://envs.sh/Tn_.jpg",
-            caption=(f"**👋 ʜᴇʟʟᴏ {user_mention},**\n\n**ʏᴏᴜ ɴᴇᴇᴅ ᴛᴏ ᴊᴏɪɴ ᴛʜᴇ [ᴄʜᴀɴɴᴇʟ]({channel_url}) ᴛᴏ sᴇɴᴅ ᴍᴇssᴀɢᴇs ɪɴ ᴛʜɪs ɢʀᴏᴜᴘ.**"),
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("๏ ᴊᴏɪɴ ᴄʜᴀɴɴᴇʟ ๏", url=channel_url)]]),
+            caption=f"**👋 ʜᴇʟʟᴏ {user_mention},**\n\n**ʏᴏᴜ ɴᴇᴇᴅ ᴛᴏ ᴊᴏɪɴ ᴏᴜʀ ᴄʜᴀɴɴᴇʟ ᴛᴏ sᴇɴᴅ ᴍᴇssᴀɢᴇs ɪɴ ᴛʜɪs ɢʀᴏᴜᴘ.**",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("๏ ᴊᴏɪɴ ᴄʜᴀɴɴᴇʟ ๏", url=channel_link)]]),
         )
         return False
-    except ChatAdminRequired:
-        forcesub_collection.delete_one({"chat_id": chat_id})
-        return True
     except Exception:
         return True
 
-
+# --- MESSAGE HANDLER ---
 @app.on_message(filters.group & ~filters.bot, group=30)
 async def enforce_forcesub(client: Client, message: Message):
-    # Agar check_forcesub False return karega tabhi user ko block mana jayega
+    # Agar user member nahi hai, toh ye function aage execute nahi hone dega
     await check_forcesub(client, message)
 
+@app.on_callback_query(filters.regex("close_force_sub"))
+async def close_force_sub(client: Client, callback_query: CallbackQuery):
+    await callback_query.message.delete()
 
 __MODULE__ = "ғsᴜʙ"
-__HELP__ = """**
-/fsub <ᴄʜᴀɴɴᴇʟ ᴜsᴇʀɴᴀᴍᴇ ᴏʀ ɪᴅ> - sᴇᴛ ғᴏʀᴄᴇ sᴜʙsᴄʀɪᴘᴛɪᴏɴ ғᴏʀ ᴛʜɪs ɢʀᴏᴜᴘ.
-/fsub off - ᴅɪsᴀʙʟᴇ ғᴏʀᴄᴇ sᴜʙsᴄʀɪᴘᴛɪᴏɴ ғᴏʀ ᴛʜɪs ɢʀᴏᴜᴘ.**
+__HELP__ = """
+/fsub @Username - ᴄʜᴀɴɴᴇʟ sᴇᴛ ᴋᴀʀɴᴇ ᴋᴇ ʟɪʏᴇ.
+/fsub off - ғsᴜʙ ʙᴀɴᴅ ᴋᴀʀɴᴇ ᴋᴇ ʟɪʏᴇ.
 """
