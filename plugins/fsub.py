@@ -18,11 +18,18 @@ forcesub_collection = fsubdb.status_db.status
 
 @app.on_message(filters.command(["fsub", "forcesub"]) & filters.group)
 async def set_forcesub(client: Client, message: Message):
+    if not message.from_user: # Anonymous admin check
+        return
+
     chat_id = message.chat.id
     user_id = message.from_user.id
 
-    member = await client.get_chat_member(chat_id, user_id)
-    if not (member.status == "creator" or user_id in SUDOERS):
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+    except Exception:
+        return
+
+    if not (member.status in ["creator", "administrator"] or user_id in SUDOERS):
         return await message.reply_text("**ᴏɴʟʏ ɢʀᴏᴜᴘ ᴏᴡɴᴇʀs ᴏʀ sᴜᴅᴏᴇʀs ᴄᴀɴ ᴜsᴇ ᴛʜɪs ᴄᴏᴍᴍᴀɴᴅ.**")
 
     if len(message.command) == 2 and message.command[1].lower() in ["off", "disable"]:
@@ -38,7 +45,12 @@ async def set_forcesub(client: Client, message: Message):
         channel_info = await client.get_chat(channel_input)
         channel_id = channel_info.id
         channel_title = channel_info.title
-        channel_link = await app.export_chat_invite_link(channel_id)
+        
+        try:
+            channel_link = await app.export_chat_invite_link(channel_id)
+        except:
+            channel_link = f"https://t.me/{channel_info.username}" if channel_info.username else "No Link"
+
         channel_username = f"{channel_info.username}" if channel_info.username else channel_link
         channel_members_count = channel_info.members_count
 
@@ -51,7 +63,6 @@ async def set_forcesub(client: Client, message: Message):
                 break
 
         if not bot_is_admin:
-            await asyncio.sleep(1)
             return await message.reply_photo(
                 photo="https://envs.sh/TnZ.jpg",
                 caption=("**🚫 I'ᴍ ɴᴏᴛ ᴀɴ ᴀᴅᴍɪɴ ɪɴ ᴛʜɪs ᴄʜᴀɴɴᴇʟ.**\n\n"
@@ -62,7 +73,6 @@ async def set_forcesub(client: Client, message: Message):
                     [[InlineKeyboardButton("๏ ᴀᴅᴅ ᴍᴇ ɪɴ ᴄʜᴀɴɴᴇʟ ๏", url=f"https://t.me/{app.username}?startchannel=s&admin=invite_users+manage_video_chats")]]
                 )
             )
-            
 
         forcesub_collection.update_one(
             {"chat_id": chat_id},
@@ -85,20 +95,9 @@ async def set_forcesub(client: Client, message: Message):
                 [[InlineKeyboardButton("๏ ᴄʟᴏsᴇ ๏", callback_data="close_force_sub")]]
             )
         )
-        await asyncio.sleep(1)
 
     except Exception as e:
-        await message.reply_photo(
-            photo="https://envs.sh/TnZ.jpg",
-            caption=("**🚫 I'ᴍ ɴᴏᴛ ᴀɴ ᴀᴅᴍɪɴ ɪɴ ᴛʜɪs ᴄʜᴀɴɴᴇʟ.**\n\n"
-                     "**➲ ᴘʟᴇᴀsᴇ ᴍᴀᴋᴇ ᴍᴇ ᴀɴ ᴀᴅᴍɪɴ ᴡɪᴛʜ:**\n\n"
-                     "**➥ Iɴᴠɪᴛᴇ Nᴇᴡ Mᴇᴍʙᴇʀs**\n\n"
-                     "🛠️ **Tʜᴇɴ ᴜsᴇ /ғsᴜʙ <ᴄʜᴀɴɴᴇʟ ᴜsᴇʀɴᴀᴍᴇ> ᴛᴏ sᴇᴛ ғᴏʀᴄᴇ sᴜʙsᴄʀɪᴘᴛɪᴏɴ.**"),
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("๏ ᴀᴅᴅ ᴍᴇ ɪɴ ᴄʜᴀɴɴᴇʟ ๏", url=f"https://t.me/{app.username}?startchannel=s&admin=invite_users+manage_video_chats")]]
-            )
-        )
-        await asyncio.sleep(1)
+        await message.reply_text(f"**Error:** `{e}`")
 
 @app.on_callback_query(filters.regex("close_force_sub"))
 async def close_force_sub(client: Client, callback_query: CallbackQuery):
@@ -107,42 +106,57 @@ async def close_force_sub(client: Client, callback_query: CallbackQuery):
     
 
 async def check_forcesub(client: Client, message: Message):
+    # Fix: Agar message user ki taraf se nahi hai toh skip karein
+    if not message.from_user:
+        return True
+
     chat_id = message.chat.id
     user_id = message.from_user.id
 
     forcesub_data = forcesub_collection.find_one({"chat_id": chat_id})
     if not forcesub_data:
-        return
+        return True
 
     channel_id = forcesub_data["channel_id"]
     channel_username = forcesub_data["channel_username"]
 
+    # Sudoers ko check se exclude karein
+    if user_id in SUDOERS:
+        return True
+
     try:
         user_member = await app.get_chat_member(channel_id, user_id)
-        if user_member:
-            return
+        return True
     except UserNotParticipant:
-        await message.delete()
-        if channel_username:
-            channel_url = f"https://t.me/{channel_username}"
+        try:
+            await message.delete()
+        except:
+            pass
+
+        if "t.me" in str(channel_username):
+            channel_url = channel_username
         else:
-            invite_link = await app.export_chat_invite_link(channel_id)
-            channel_url = invite_link
+            channel_url = f"https://t.me/{channel_username}"
+
+        user_mention = message.from_user.mention if message.from_user else "User"
+        
         await message.reply_photo(
             photo="https://envs.sh/Tn_.jpg",
-            caption=(f"**👋 ʜᴇʟʟᴏ {message.from_user.mention},**\n\n**ʏᴏᴜ ɴᴇᴇᴅ ᴛᴏ ᴊᴏɪɴ ᴛʜᴇ [ᴄʜᴀɴɴᴇʟ]({channel_url}) ᴛᴏ sᴇɴᴅ ᴍᴇssᴀɢᴇs ɪɴ ᴛʜɪs ɢʀᴏᴜᴘ.**"),
+            caption=(f"**👋 ʜᴇʟʟᴏ {user_mention},**\n\n**ʏᴏᴜ ɴᴇᴇᴅ ᴛᴏ ᴊᴏɪɴ ᴛʜᴇ [ᴄʜᴀɴɴᴇʟ]({channel_url}) ᴛᴏ sᴇɴᴅ ᴍᴇssᴀɢᴇs ɪɴ ᴛʜɪs ɢʀᴏᴜᴘ.**"),
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("๏ ᴊᴏɪɴ ᴄʜᴀɴɴᴇʟ ๏", url=channel_url)]]),
         )
-        await asyncio.sleep(1)
+        return False
     except ChatAdminRequired:
         forcesub_collection.delete_one({"chat_id": chat_id})
-        return await message.reply_text("**🚫 I'ᴍ ɴᴏ ʟᴏɴɢᴇʀ ᴀɴ ᴀᴅᴍɪɴ ɪɴ ᴛʜᴇ ғᴏʀᴄᴇᴅ sᴜʙsᴄʀɪᴘᴛɪᴏɴ ᴄʜᴀɴɴᴇʟ. ғᴏʀᴄᴇ sᴜʙsᴄʀɪᴘᴛɪᴏɴ ʜᴀs ʙᴇᴇɴ ᴅɪsᴀʙʟᴇᴅ.**")
+        return True
+    except Exception:
+        return True
 
 
-@app.on_message(filters.group, group=30)
+@app.on_message(filters.group & ~filters.bot, group=30)
 async def enforce_forcesub(client: Client, message: Message):
-    if not await check_forcesub(client, message):
-        return
+    # Agar check_forcesub False return karega tabhi user ko block mana jayega
+    await check_forcesub(client, message)
 
 
 __MODULE__ = "ғsᴜʙ"
