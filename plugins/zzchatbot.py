@@ -1,10 +1,12 @@
 # ======================================================
 # ©️ 2025-30 All Rights Reserved by Revange ⚡
-# 🛡️ ChatBot Version: 9.0 [Gemini Free AI - Fixed]
+# 🛡️ ChatBot Version: 10.0 [Master Jugaad - No API Key]
 # 🧑‍💻 Developer: t.me/dmcatelegram
 # =======================================================
 
-import google.generativeai as genai
+import random
+import re
+import requests
 from pymongo import MongoClient
 from pyrogram import Client, filters
 from pyrogram.enums import ChatAction
@@ -12,29 +14,36 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from config import MONGO_DB_URI as MONGO_URL
 from VIPMUSIC import app as nexichat
 
-# --- CONFIGURATION ---
-# Gemini API Key yahan dalein (Free from: https://aistudio.google.com/app/apikey)
-GEMINI_API_KEY = "AIzaSyCdjzzyOeCrUmo_9JlXg7Jr7Q5aENXGVHI" 
-genai.configure(api_key=GEMINI_API_KEY)
-
-# AI Persona: Female & Respectful
-SYSTEM_PROMPT = (
-    "Tu ek ladki hai, tera naam Nexi hai. "
-    "Tu hamesha bahut tameez aur izzat se baat karti hai. "
-    "Tu 'Aap' aur 'Ji' ka istemal karti hai. "
-    "Teri bhasha Hinglish (Hindi + English mixed) honi chahiye. "
-    "Hamesha ek ladki (female) ki tarah react karna (e.g., karti hoon, rahi hoon)."
-)
-
-# Model Setup
-model = genai.GenerativeModel(
-    model_name="gemini-1.5-flash",
-    system_instruction=SYSTEM_PROMPT
-)
-
-# Database
+# Database Setup
 chatdb = MongoClient(MONGO_URL)
 status_db = chatdb["ChatBotStatusDb"]["StatusCollection"]
+
+# --- FEMALE & RESPECT FILTER ---
+def make_female_and_polite(text):
+    """Jawab ko ladki jaisa aur izzatdar banane ka jugaad"""
+    # Male words ko Female mein badalna
+    replacements = {
+        "karta hoon": "karti hoon",
+        "karta hu": "karti hu",
+        "raha hoon": "rahi hoon",
+        "raha hu": "rahi hu",
+        "gaya tha": "gayi thi",
+        "aaunga": "aaungi",
+        "karunga": "karungi",
+        "bhai": "ji",
+        "tu ": "aap ",
+        "tera": "aapka",
+        "tujhe": "aapko",
+        "pagal": "pagli",
+        "ladka": "ladki"
+    }
+    for male, female in replacements.items():
+        text = re.sub(f"\\b{male}\\b", female, text, flags=re.IGNORECASE)
+    
+    # Extra izzat add karna agar "aap" na ho
+    if "aap" not in text.lower() and "ji" not in text.lower():
+        text = text + " ji"
+    return text
 
 # --- COMMANDS ---
 
@@ -45,36 +54,54 @@ async def chaton(client, message):
         InlineKeyboardButton(text="ᴅɪsᴀʙʟᴇ", callback_data="disable_chatbot")
     ]]
     await message.reply_text(
-        "🤖 **FREE AI Chatbot Settings**\n\nMain Gemini AI use kar rahi hoon jo bilkul free hai. ✨",
+        "🤖 **Master Chatbot Settings**\n\nAb main bina kisi API key ke har message ka reply dungi! ✨",
         reply_markup=InlineKeyboardMarkup(buttons),
     )
 
-# --- AI CHATTING LOGIC ---
+# --- CHATTING LOGIC (NO API KEY NEEDED) ---
 
 @nexichat.on_message(filters.text & ~filters.bot)
-async def ai_chatbot_response(client: Client, message: Message):
+async def jugaad_chatbot_response(client: Client, message: Message):
+    # 1. Check if Enabled
     chat_status = status_db.find_one({"chat_id": message.chat.id})
     if chat_status and chat_status.get("status") == "disabled":
         return
 
+    # 2. Ignore Commands
     if message.text.startswith(("/", "!", ".")):
         return
 
     try:
+        # Show Typing Action
         await client.send_chat_action(message.chat.id, ChatAction.TYPING)
         
-        # Start AI Chat
-        chat_session = model.start_chat(history=[])
-        response = chat_session.send_message(message.text)
+        # --- JUGAAD API (Public Free API) ---
+        # Yeh API bina key ke chalti hai
+        user_msg = message.text
+        api_url = f"https://api.simsimi.net/v2/?text={user_msg}&lc=hi" # Hindi/Hinglish Support
         
-        ai_reply = response.text.strip()
+        response = requests.get(api_url, timeout=10)
+        data = response.json()
+        
+        # API se reply nikalna
+        if "success" in data:
+            raw_reply = data["success"]
+        else:
+            # Fallback agar simsimi fail ho
+            raw_reply = "Ji? Main samajh nahi paayi."
 
-        if ai_reply:
-            await message.reply_text(ai_reply)
+        # 3. Apply Female & Respect Tone
+        final_reply = make_female_and_polite(raw_reply)
+
+        # 4. Final Reply
+        if final_reply:
+            await message.reply_text(final_reply)
             
     except Exception as e:
-        print(f"AI ERROR: {e}")
-        # Agar bot crash ho toh log print hoga par bot chalta rahega
+        print(f"Jugaad Error: {e}")
+        # Agar kuch bhi kaam na kare toh chota sa reply
+        if message.chat.type == "private":
+            await message.reply_text("Ji, aapne kya kaha? ✨")
 
 # --- CALLBACK HANDLERS ---
 @nexichat.on_callback_query(filters.regex(r"enable_chatbot|disable_chatbot"))
@@ -82,9 +109,13 @@ async def cb_handler(client, query):
     chat_id = query.message.chat.id
     if query.data == "enable_chatbot":
         status_db.update_one({"chat_id": chat_id}, {"$set": {"status": "enabled"}}, upsert=True)
-        await query.answer("AI Chatbot Enabled!")
-        await query.edit_message_text("✅ **AI Chatbot Active!** ✨")
+        await query.answer("Chatbot Enabled!")
+        await query.edit_message_text("✅ **Chatbot Active!**\nAb main sabka reply karungi ek ladki ki tarah. ✨")
     else:
         status_db.update_one({"chat_id": chat_id}, {"$set": {"status": "disabled"}}, upsert=True)
-        await query.answer("AI Chatbot Disabled!")
-        await query.edit_message_text("❌ **AI Chatbot Disabled.**")
+        await query.answer("Chatbot Disabled!")
+        await query.edit_message_text("❌ **Chatbot Disabled.**")
+
+# ======================================================
+# 🚀 MASTER JUGAAD MODULE LOADED (FREE & FEMALE TONE)
+# ======================================================
