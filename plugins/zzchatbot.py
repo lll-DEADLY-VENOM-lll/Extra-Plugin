@@ -9,7 +9,7 @@ import config
 from VIPMUSIC import app as nexichat
 
 # Database Connections
-WORD_MONGO_URL = "mongodb+srv://AbhiModszYT:AbhiModszYT@abhimodszyt.flmdtda.mongodb.net/?retryWrites=true&w=majority"
+WORD_MONGO_URL = "mongodb+srv://vishalpandeynkp:Bal6Y6FZeQeoAoqV@cluster0.dzgwt.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
 chatdb = MongoClient(MONGO_URL)
 worddb = MongoClient(WORD_MONGO_URL)
 status_db = chatdb["ChatBotStatusDb"]["StatusCollection"]
