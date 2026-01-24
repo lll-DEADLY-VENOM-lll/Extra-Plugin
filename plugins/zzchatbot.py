@@ -1,3 +1,9 @@
+# ======================================================
+# ©️ 2025-30 All Rights Reserved by Revange ⚡
+# 🛡️ ChatBot Version: 3.5 [Hinglish Enabled]
+# 🧑‍💻 Developer: t.me/dmcatelegram
+# =======================================================
+
 import random
 from pymongo import MongoClient
 from pyrogram import Client, filters
@@ -16,14 +22,13 @@ status_db = chatdb["ChatBotStatusDb"]["StatusCollection"]
 chatai = worddb["Word"]["WordDb"]
 lang_db = chatdb["ChatLangDb"]["LangCollection"]
 
-# Languages list (keeping your original list)
+# Languages list (Hinglish Added)
 languages = {
-    'english': 'en', 'hindi': 'hi', 'Myanmar': 'my', 'russian': 'ru', 'spanish': 'es', 
-    'arabic': 'ar', 'turkish': 'tr', 'german': 'de', 'french': 'fr', 
-    'italian': 'it', 'persian': 'fa', 'indonesian': 'id', 'portuguese': 'pt',
-    'ukrainian': 'uk', 'filipino': 'tl', 'korean': 'ko', 'japanese': 'ja', 
-    'polish': 'pl', 'vietnamese': 'vi', 'thai': 'th', 'dutch': 'nl',
-    'bhojpuri': 'bho', 'maithili': 'mai', 'urdu': 'ur', 'bengali': 'bn'
+    'Hinglish': 'hi-en', # New Hinglish Option
+    'English': 'en', 'Hindi': 'hi', 'Bhojpuri': 'bho', 'Urdu': 'ur',
+    'Marathi': 'mr', 'Gujarati': 'gu', 'Tamil': 'ta', 'Telugu': 'te',
+    'Punjabi': 'pa', 'Bengali': 'bn', 'Malayalam': 'ml', 'Kannada': 'kn',
+    'Spanish': 'es', 'French': 'fr', 'German': 'de', 'Russian': 'ru'
 }
 
 CHATBOT_ON = [
@@ -37,8 +42,8 @@ def generate_language_buttons(languages):
     buttons = []
     current_row = []
     for lang, code in languages.items():
-        current_row.append(InlineKeyboardButton(lang.capitalize(), callback_data=f'setlang_{code}'))
-        if len(current_row) == 4:  
+        current_row.append(InlineKeyboardButton(lang, callback_data=f'setlang_{code}'))
+        if len(current_row) == 3:  
             buttons.append(current_row)
             current_row = []  
     if current_row: buttons.append(current_row)
@@ -46,45 +51,47 @@ def generate_language_buttons(languages):
 
 def get_chat_language(chat_id):
     chat_lang = lang_db.find_one({"chat_id": chat_id})
-    return chat_lang["language"] if chat_lang and "language" in chat_lang else None
+    return chat_lang["language"] if chat_lang and "language" in chat_lang else "hi-en"
 
 # --- COMMANDS ---
 
 @nexichat.on_message(filters.command(["chatbotlang", "setchatbotlang"]))
 async def set_language(client, message):
-    await message.reply_text("ᴘʟᴇᴀsᴇ sᴇʟᴇᴄᴛ ʏᴏᴜʀ ᴄʜᴀᴛ ʟᴀɴɢᴜᴀɢᴇ:", reply_markup=generate_language_buttons(languages))
+    await message.reply_text(
+        "✨ **ᴘʟᴇᴀsᴇ sᴇʟᴇᴄᴛ ʏᴏᴜʀ ᴄʜᴀᴛ ʟᴀɴɢᴜᴀɢᴇ:**\n\n*Hinglish means bot will use mixed Hindi-English.*", 
+        reply_markup=generate_language_buttons(languages)
+    )
 
 @nexichat.on_message(filters.command("chatbot"))
 async def chaton(client, message):
     await message.reply_text(
-        f"ᴄʜᴀᴛ: {message.chat.title or 'Private'}\n**ᴄʜᴏᴏsᴇ ᴀɴ ᴏᴘᴛɪᴏɴ ᴛᴏ ᴇɴᴀʙʟᴇ/ᴅɪsᴀʙʟᴇ ᴄʜᴀᴛʙᴏᴛ.**",
+        f"🤖 **ᴄʜᴀᴛʙᴏᴛ sᴇᴛᴛɪɴɢs**\n\nᴄʜᴀᴛ: {message.chat.title or 'Private'}\n**ᴄʜᴏᴏsᴇ ᴀɴ ᴏᴘᴛɪᴏɴ ᴛᴏ ᴇɴᴀʙʟᴇ/ᴅɪsᴀʙʟᴇ:**",
         reply_markup=InlineKeyboardMarkup(CHATBOT_ON),
     )
+
+@nexichat.on_message(filters.command(["resetlang", "nolang"]))
+async def reset_lang(client, message):
+    lang_db.update_one({"chat_id": message.chat.id}, {"$set": {"language": "hi-en"}}, upsert=True)
+    await message.reply_text("✅ **Bot language reset to Hinglish (Mixed).**")
 
 # --- CHATBOT CORE LOGIC ---
 
 @nexichat.on_message((filters.text | filters.sticker | filters.photo | filters.video | filters.audio) & ~filters.bot)
 async def chatbot_response(client: Client, message: Message):
-    # 1. Check if ChatBot is disabled
     chat_status = status_db.find_one({"chat_id": message.chat.id})
     if chat_status and chat_status.get("status") == "disabled":
         return
 
-    # 2. Skip commands
     if message.text and any(message.text.startswith(prefix) for prefix in ["!", "/", ".", "?", "@", "#"]):
         return
 
-    # 3. Logic for Reply:
-    # Trigger if: 
-    # - It's a Private Chat (DM)
-    # - OR it's a reply to the bot in a group
+    # Trigger logic: Private Chat OR Reply to Bot in Groups
     is_private = message.chat.type == ChatType.PRIVATE
     is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == nexichat.id
 
     if is_private or is_reply_to_bot:
         await client.send_chat_action(message.chat.id, ChatAction.TYPING)
         
-        # Get query text (sticker/photo don't have text, use empty string or specific tag)
         query_text = message.text if message.text else "sticker_or_media"
         reply_data = await get_reply(query_text)
         
@@ -92,12 +99,13 @@ async def chatbot_response(client: Client, message: Message):
             response_text = reply_data["text"]
             chat_lang = get_chat_language(message.chat.id)
 
-            # Translation logic
-            if chat_lang and chat_lang != "en" and chat_lang != "nolang" and reply_data["check"] == "none":
+            # --- HINGLISH/MIXED LOGIC ---
+            # If lang is 'hi-en' or 'en', we don't translate (keeps it natural)
+            if chat_lang not in ["hi-en", "en", "nolang"] and reply_data["check"] == "none":
                 try:
                     response_text = GoogleTranslator(source='auto', target=chat_lang).translate(response_text)
                 except:
-                    pass
+                    pass # Fallback to original if translation fails
 
             if reply_data["check"] == "sticker":
                 await message.reply_sticker(reply_data["text"])
@@ -110,29 +118,24 @@ async def chatbot_response(client: Client, message: Message):
             else:
                 await message.reply_text(response_text)
         else:
-            if is_private: # Sirf private mein 'what' bole agar reply na mile
-                await message.reply_text("**I don't understand, but I'm learning!**")
+            if is_private:
+                await message.reply_text("🤔?")
 
-    # 4. Save reply for learning (only if someone replies to someone else)
+    # Learning Logic: Save replies
     if message.reply_to_message and not message.reply_to_message.from_user.is_bot:
         await save_reply(message.reply_to_message, message)
 
 async def get_reply(word: str):
     is_chat = list(chatai.find({"word": word}))
     if not is_chat:
-        # Agar word nahi milta toh random kuch bhi utha lo (Optional)
-        # is_chat = list(chatai.aggregate([{"$sample": {"size": 1}}])) 
         return None
     return random.choice(is_chat)
 
 async def save_reply(original_message: Message, reply_message: Message):
-    # Basic logic to save data
     try:
         if not original_message.text: return
-        
         word = original_message.text
-        check = "none"
-        content = ""
+        content, check = "", "none"
 
         if reply_message.sticker:
             content, check = reply_message.sticker.file_id, "sticker"
@@ -144,25 +147,32 @@ async def save_reply(original_message: Message, reply_message: Message):
             content, check = reply_message.text, "none"
 
         if content:
-            is_chat = chatai.find_one({"word": word, "text": content})
-            if not is_chat:
+            if not chatai.find_one({"word": word, "text": content}):
                 chatai.insert_one({"word": word, "text": content, "check": check})
     except:
         pass
 
 # --- CALLBACK HANDLERS ---
-@nexichat.on_callback_query(filters.regex(r"setlang_|enable_chatbot|disable_chatbot|choose_lang|nolang"))
+@nexichat.on_callback_query(filters.regex(r"setlang_|enable_chatbot|disable_chatbot|choose_lang"))
 async def cb_handler(client, query: CallbackQuery):
     chat_id = query.message.chat.id
     
-    if query.data == "enable_chatbot":
+    if query.data.startswith("setlang_"):
+        lang_code = query.data.split("_")[1]
+        lang_db.update_one({"chat_id": chat_id}, {"$set": {"language": lang_code}}, upsert=True)
+        await query.answer(f"Language set to {lang_code}!", show_alert=True)
+        await query.edit_message_text(f"✅ **Chat language updated to: {lang_code.upper()}**")
+
+    elif query.data == "enable_chatbot":
         status_db.update_one({"chat_id": chat_id}, {"$set": {"status": "enabled"}}, upsert=True)
-        await query.answer("Chatbot enabled ✅", show_alert=True)
-        await query.edit_message_text(f"ᴄʜᴀᴛ: {query.message.chat.title or 'Private'}\n**ᴄʜᴀᴛʙᴏᴛ ʜᴀs ʙᴇᴇɴ ᴇɴᴀʙʟᴇᴅ.**")
+        await query.answer("Chatbot Enabled!")
+        await query.edit_message_text("✅ **Chatbot is now ACTIVE in this chat.**")
 
     elif query.data == "disable_chatbot":
         status_db.update_one({"chat_id": chat_id}, {"$set": {"status": "disabled"}}, upsert=True)
-        await query.answer("Chatbot disabled!", show_alert=True)
-        await query.edit_message_text(f"ᴄʜᴀᴛ: {query.message.chat.title or 'Private'}\n**ᴄʜᴀᴛʙᴏᴛ ʜᴀs ʙᴇᴇɴ ᴅɪsᴀʙʟᴇᴅ.**")
-    
-    # ... baki callback logic same rahegi
+        await query.answer("Chatbot Disabled!")
+        await query.edit_message_text("❌ **Chatbot is now INACTIVE in this chat.**")
+
+# ======================================================
+# 🚀 NEXT-GEN AI MODULE LOADED
+# ======================================================
