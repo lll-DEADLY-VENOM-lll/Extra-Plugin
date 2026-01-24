@@ -1,6 +1,6 @@
 # ======================================================
 # ©️ 2025-30 All Rights Reserved by Revange ⚡
-# 🛡️ ChatBot Version: 3.5 [Hinglish Enabled]
+# 🛡️ ChatBot Version: 4.0 [Full Auto-Response]
 # 🧑‍💻 Developer: t.me/dmcatelegram
 # =======================================================
 
@@ -22,9 +22,9 @@ status_db = chatdb["ChatBotStatusDb"]["StatusCollection"]
 chatai = worddb["Word"]["WordDb"]
 lang_db = chatdb["ChatLangDb"]["LangCollection"]
 
-# Languages list (Hinglish Added)
+# Languages list
 languages = {
-    'Hinglish': 'hi-en', # New Hinglish Option
+    'Hinglish': 'hi-en',
     'English': 'en', 'Hindi': 'hi', 'Bhojpuri': 'bho', 'Urdu': 'ur',
     'Marathi': 'mr', 'Gujarati': 'gu', 'Tamil': 'ta', 'Telugu': 'te',
     'Punjabi': 'pa', 'Bengali': 'bn', 'Malayalam': 'ml', 'Kannada': 'kn',
@@ -78,55 +78,60 @@ async def reset_lang(client, message):
 
 @nexichat.on_message((filters.text | filters.sticker | filters.photo | filters.video | filters.audio) & ~filters.bot)
 async def chatbot_response(client: Client, message: Message):
+    # 1. Check if chatbot is disabled
     chat_status = status_db.find_one({"chat_id": message.chat.id})
     if chat_status and chat_status.get("status") == "disabled":
         return
 
+    # 2. Ignore Commands
     if message.text and any(message.text.startswith(prefix) for prefix in ["!", "/", ".", "?", "@", "#"]):
         return
 
-    # Trigger logic: Private Chat OR Reply to Bot in Groups
-    is_private = message.chat.type == ChatType.PRIVATE
-    is_reply_to_bot = message.reply_to_message and message.reply_to_message.from_user.id == nexichat.id
+    # 3. Trigger Action (Typing...)
+    await client.send_chat_action(message.chat.id, ChatAction.TYPING)
+    
+    # 4. Get Response from Database
+    query_text = message.text.lower().strip() if message.text else "sticker_or_media"
+    reply_data = await get_reply(query_text)
+    
+    if reply_data:
+        response_text = reply_data["text"]
+        chat_lang = get_chat_language(message.chat.id)
 
-    if is_private or is_reply_to_bot:
-        await client.send_chat_action(message.chat.id, ChatAction.TYPING)
-        
-        query_text = message.text if message.text else "sticker_or_media"
-        reply_data = await get_reply(query_text)
-        
-        if reply_data:
-            response_text = reply_data["text"]
-            chat_lang = get_chat_language(message.chat.id)
+        # Translation Logic (Skip for Hinglish/English)
+        if chat_lang not in ["hi-en", "en", "nolang"] and reply_data["check"] == "none":
+            try:
+                response_text = GoogleTranslator(source='auto', target=chat_lang).translate(response_text)
+            except:
+                pass 
 
-            # --- HINGLISH/MIXED LOGIC ---
-            # If lang is 'hi-en' or 'en', we don't translate (keeps it natural)
-            if chat_lang not in ["hi-en", "en", "nolang"] and reply_data["check"] == "none":
-                try:
-                    response_text = GoogleTranslator(source='auto', target=chat_lang).translate(response_text)
-                except:
-                    pass # Fallback to original if translation fails
-
-            if reply_data["check"] == "sticker":
-                await message.reply_sticker(reply_data["text"])
-            elif reply_data["check"] == "photo":
-                await message.reply_photo(reply_data["text"])
-            elif reply_data["check"] == "video":
-                await message.reply_video(reply_data["text"])
-            elif reply_data["check"] == "audio":
-                await message.reply_audio(reply_data["text"])
-            else:
-                await message.reply_text(response_text)
+        # Sending Reply
+        if reply_data["check"] == "sticker":
+            await message.reply_sticker(reply_data["text"])
+        elif reply_data["check"] == "photo":
+            await message.reply_photo(reply_data["text"])
+        elif reply_data["check"] == "video":
+            await message.reply_video(reply_data["text"])
+        elif reply_data["check"] == "audio":
+            await message.reply_audio(reply_data["text"])
         else:
-            if is_private:
-                await message.reply_text("🤔?")
+            await message.reply_text(response_text)
+    else:
+        # Agar private chat hai aur answer nahi mila
+        if message.chat.type == ChatType.PRIVATE:
+            await message.reply_text("🤔?")
 
-    # Learning Logic: Save replies
+    # 5. Learning Logic: Save what people are chatting
     if message.reply_to_message and not message.reply_to_message.from_user.is_bot:
         await save_reply(message.reply_to_message, message)
 
 async def get_reply(word: str):
+    # Search for the word in DB
     is_chat = list(chatai.find({"word": word}))
+    if not is_chat:
+        # Short search (agar exact word na mile)
+        is_chat = list(chatai.find({"word": {"$regex": word, "$options": "i"}}))
+        
     if not is_chat:
         return None
     return random.choice(is_chat)
@@ -134,7 +139,7 @@ async def get_reply(word: str):
 async def save_reply(original_message: Message, reply_message: Message):
     try:
         if not original_message.text: return
-        word = original_message.text
+        word = original_message.text.lower().strip()
         content, check = "", "none"
 
         if reply_message.sticker:
@@ -147,6 +152,7 @@ async def save_reply(original_message: Message, reply_message: Message):
             content, check = reply_message.text, "none"
 
         if content:
+            # Duplicate check
             if not chatai.find_one({"word": word, "text": content}):
                 chatai.insert_one({"word": word, "text": content, "check": check})
     except:
@@ -166,13 +172,13 @@ async def cb_handler(client, query: CallbackQuery):
     elif query.data == "enable_chatbot":
         status_db.update_one({"chat_id": chat_id}, {"$set": {"status": "enabled"}}, upsert=True)
         await query.answer("Chatbot Enabled!")
-        await query.edit_message_text("✅ **Chatbot is now ACTIVE in this chat.**")
+        await query.edit_message_text("✅ **Chatbot is now ACTIVE. I will reply to every message.**")
 
     elif query.data == "disable_chatbot":
         status_db.update_one({"chat_id": chat_id}, {"$set": {"status": "disabled"}}, upsert=True)
         await query.answer("Chatbot Disabled!")
-        await query.edit_message_text("❌ **Chatbot is now INACTIVE in this chat.**")
+        await query.edit_message_text("❌ **Chatbot is now INACTIVE.**")
 
 # ======================================================
-# 🚀 NEXT-GEN AI MODULE LOADED
+# 🚀 AUTO-RESPONSE MODULE LOADED
 # ======================================================
