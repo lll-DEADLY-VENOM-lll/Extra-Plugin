@@ -30,7 +30,6 @@ def make_round(pfp, size=(240, 240)):
     
     canvas = Image.new("RGBA", (size[0]+12, size[1]+12), (0, 0, 0, 0))
     draw_can = ImageDraw.Draw(canvas)
-    # Golden-Cyan mix border for premium look
     draw_can.ellipse((0, 0, size[0]+12, size[1]+12), outline=(0, 255, 255, 200), width=6)
     canvas.paste(pfp, (6, 6), pfp)
     return canvas
@@ -42,17 +41,18 @@ def create_welcome_card(u_id, u_first, u_username, c_name, u_pfp, c_pfp):
         if os.path.exists(bg_path):
             bg = Image.open(bg_path).convert("RGBA").resize((1200, 600))
         else:
-            bg = Image.new("RGBA", (1200, 600), (20, 20, 30))
+            # अगर इमेज नहीं है तो डार्क बैकग्राउंड ताकि सफेद टेक्स्ट दिखे
+            bg = Image.new("RGBA", (1200, 600), (15, 15, 25))
 
         # Photo Processing
         user_img = make_round(Image.open(u_pfp), (225, 225))
         chat_img = make_round(Image.open(c_pfp), (225, 225))
 
-        # --- EXACT FRAME COORDINATES --- #
+        # Paste Photos
         bg.paste(chat_img, (135, 160), chat_img) 
         bg.paste(user_img, (840, 160), user_img) 
 
-        # Compact Panel at Bottom
+        # Bottom Panel
         overlay = Image.new("RGBA", (1200, 600), (0, 0, 0, 0))
         draw_ov = ImageDraw.Draw(overlay)
         draw_ov.rounded_rectangle((360, 440, 840, 560), radius=25, fill=(0, 0, 0, 180))
@@ -60,21 +60,25 @@ def create_welcome_card(u_id, u_first, u_username, c_name, u_pfp, c_pfp):
 
         # Typography
         try:
-            f_title = ImageFont.truetype("assets/font.ttf", 45)
-            f_group = ImageFont.truetype("assets/font.ttf", 60)
+            f_title = ImageFont.truetype("assets/font.ttf", 50)
+            f_group = ImageFont.truetype("assets/font.ttf", 55)
             f_info = ImageFont.truetype("assets/font.ttf", 30)
         except:
             f_title = f_group = f_info = ImageFont.load_default()
 
         draw = ImageDraw.Draw(bg)
 
-        draw.text((600, 130), "WELCOME TO", font=f_title, fill=(255, 255, 255), anchor="mm")
+        # 1. "WELCOME TO" (रंग Cyan रखा है ताकि सफेद पर भी दिखे)
+        draw.text((600, 100), "WELCOME TO", font=f_title, fill=(0, 255, 255), anchor="mm")
         
-        clean_c_name = re.sub(r'[^\x00-\x7F]+', '', c_name) or "GROUP"
-        draw.text((600, 195), f"{clean_c_name[:15].upper()}", font=f_group, fill=(0, 255, 255), anchor="mm")
+        # 2. GROUP NAME (Regex हटा दिया ताकि पूरा नाम आए)
+        # सिर्फ इमोजी हटाने के लिए हल्का फिल्टर
+        clean_c_name = c_name[:20] if c_name else "GROUP"
+        draw.text((600, 180), f"{clean_c_name.upper()}", font=f_group, fill=(255, 255, 255), anchor="mm")
 
-        clean_u_name = re.sub(r'[^\x00-\x7F]+', '', u_first) or "User"
-        draw.text((390, 455), f"NAME: {clean_u_name[:15]}", font=f_info, fill=(255, 255, 255))
+        # 3. USER DETAILS
+        clean_u_name = u_first[:15] if u_first else "User"
+        draw.text((390, 455), f"NAME: {clean_u_name}", font=f_info, fill=(255, 255, 255))
         draw.text((390, 488), f"ID: {u_id}", font=f_info, fill=(0, 255, 255))
         draw.text((390, 521), f"USER: {u_username[:15]}", font=f_info, fill=(255, 255, 255))
 
@@ -82,7 +86,7 @@ def create_welcome_card(u_id, u_first, u_username, c_name, u_pfp, c_pfp):
         bg.save(out)
         return out
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error in create_welcome_card: {e}")
         return None
 
 # --- Pyrogram Handlers --- #
@@ -96,24 +100,22 @@ async def member_join_handler(_, member: ChatMemberUpdated):
         return
 
     user = member.new_chat_member.user
+    u_username = f"@{user.username}" if user.username else "No Username"
     
     u_p = await app.download_media(user.photo.big_file_id, f"u{user.id}.png") if user.photo else "assets/nodp.png"
     c_p = await app.download_media(member.chat.photo.big_file_id, f"c{member.chat.id}.png") if member.chat.photo else "assets/nodp.png"
 
     loop = asyncio.get_running_loop()
-    card = await loop.run_in_executor(None, create_welcome_card, user.id, user.first_name, f"@{user.username}" if user.username else "No User", member.chat.title, u_p, c_p)
+    card = await loop.run_in_executor(None, create_welcome_card, user.id, user.first_name, u_username, member.chat.title, u_p, c_p)
 
     if card:
-        u_username = f"@{user.username}" if user.username else "No Username"
-        
-        # --- NEW REQUESTED CAPTION STYLE ---
         caption = (
             f"ㅤㅤㅤㅤ◦•●◉✿ ᴡᴇʟᴄᴏᴍᴇ ʙᴀʙʏ ✿◉●•◦\n"
             f"▰▱▱▱▱▱▱▱▱▱▱▱▱▱▰\n\n"
             f"● ɴᴀᴍᴇ ➥ {user.mention}\n"
             f"● ᴜsᴇʀɴᴀᴍᴇ ➥ {u_username}\n"
             f"● ᴜsᴇʀ ɪᴅ ➥ <code>{user.id}</code>\n\n"
-            f"❖ ᴘᴏᴡᴇʀᴇᴅ ʙʏ ➥ <a href='https://t.me/{app.username}'>{app.mention}</a>\n"
+            f"❖ ᴘᴏᴡᴇʀᴇᴅ ʙʏ ➥ <a href='https://t.me/{app.username}'>{app.name}</a>\n"
             f"▰▱▱▱▱▱▱▱▱▱▱▱▱▱▰"
         )
         
