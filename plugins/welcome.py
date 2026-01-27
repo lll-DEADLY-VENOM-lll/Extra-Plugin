@@ -19,10 +19,10 @@ async def get_welcome_status(chat_id):
 async def set_welcome_status(chat_id, state):
     status_db.update_one({"chat_id": chat_id}, {"$set": {"welcome": state}}, upsert=True)
 
-# --- Improved Image Generation --- #
+# --- High-Resolution Image Logic --- #
 
-def make_round(pfp_path, size=(450, 450)):
-    """Creates a large circular PFP with a thick black border."""
+def make_round(pfp_path, size=(520, 520)):
+    """Creates a massive circular PFP with a thick black border."""
     try:
         pfp = Image.open(pfp_path).convert("RGBA")
         pfp = pfp.resize(size, Image.Resampling.LANCZOS)
@@ -32,62 +32,65 @@ def make_round(pfp_path, size=(450, 450)):
         output = ImageOps.fit(pfp, mask.size, centering=(0.5, 0.5))
         output.putalpha(mask)
         
-        # Border canvas
-        border_size = (size[0] + 30, size[1] + 30)
+        # Canvas for the border
+        border_size = (size[0] + 40, size[1] + 40)
         canvas = Image.new("RGBA", border_size, (0, 0, 0, 0))
         draw_can = ImageDraw.Draw(canvas)
-        draw_can.ellipse((0, 0, border_size[0]-5, border_size[1]-5), outline="black", width=15)
-        canvas.paste(output, (15, 15), output)
+        # Extra thick black border (width=20)
+        draw_can.ellipse((0, 0, border_size[0]-5, border_size[1]-5), outline="black", width=20)
+        canvas.paste(output, (20, 20), output)
         return canvas
     except:
         return None
 
 def create_welcome_card(u_id, u_first, u_username, u_pfp_path):
     try:
-        # Load Background
+        # 1. Load your white background image
         bg_path = "assets/white_bg.png"
         if os.path.exists(bg_path):
-            bg = Image.open(bg_path).convert("RGBA").resize((1200, 675))
+            bg = Image.open(bg_path).convert("RGBA").resize((1280, 720))
         else:
-            bg = Image.new("RGBA", (1200, 675), (255, 255, 255))
+            bg = Image.new("RGBA", (1280, 720), (255, 255, 255))
 
         draw = ImageDraw.Draw(bg)
         
-        # INCREASED FONT SIZES
+        # 2. MASSIVE FONT SIZES
         try:
-            f_welcome = ImageFont.truetype("assets/cursive.ttf", 220) # Very Large
-            f_details = ImageFont.truetype("assets/font.ttf", 90)     # Big & Bold
-            f_footer = ImageFont.truetype("assets/font.ttf", 55)      # Clear Footer
+            f_welcome = ImageFont.truetype("assets/cursive.ttf", 300) # Giant Welcome
+            f_details = ImageFont.truetype("assets/font.ttf", 110)    # Massive Details
+            f_footer = ImageFont.truetype("assets/font.ttf", 60)      # Clear Footer
         except:
             f_welcome = f_details = f_footer = ImageFont.load_default()
 
-        # Draw "Welcome" (Top Left)
+        # 3. Draw Text (Color: Pure Black)
+        # "Welcome" text (Top Left)
         draw.text((80, 40), "Welcome", font=f_welcome, fill="black")
 
-        # Draw ID & Username (Left Center)
-        draw.text((90, 320), f"ID : {u_id}", font=f_details, fill="black")
-        draw.text((90, 430), f"USERNAME : {u_username}", font=f_details, fill="black")
+        # User ID and Username (Center Left)
+        draw.text((100, 380), f"ID : {u_id}", font=f_details, fill="black")
+        draw.text((100, 500), f"USERNAME : {u_username}", font=f_details, fill="black")
 
-        # Draw Footer Text
-        draw.text((600, 580), "THANKS FOR JOINING US", font=f_footer, fill="black", anchor="mm")
+        # Footer at the bottom
+        draw.text((640, 640), "THANKS FOR JOINING US", font=f_footer, fill="black", anchor="mm")
         
-        # Thick decorative line
-        draw.line((350, 620, 850, 620), fill="black", width=6)
-        draw.ellipse((585, 605, 615, 635), fill="black") # Bigger Center Dot
+        # Thick decorative line at bottom center
+        draw.line((400, 680, 880, 680), fill="black", width=12)
+        draw.ellipse((625, 665, 655, 695), fill="black") # Decorative dot
 
-        # Paste Profile Picture (Right Side - Large)
-        pfp_circular = make_round(u_pfp_path, (430, 430))
+        # 4. Paste Massive Profile Picture (Right Side)
+        pfp_circular = make_round(u_pfp_path, (520, 520))
         if pfp_circular:
-            bg.paste(pfp_circular, (680, 80), pfp_circular)
+            # Shifted right to fill the space
+            bg.paste(pfp_circular, (680, 50), pfp_circular)
 
         output_path = f"downloads/welcome_{u_id}.png"
         bg.save(output_path)
         return output_path
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Drawing Error: {e}")
         return None
 
-# --- Telegram Handlers --- #
+# --- Pyrogram Handlers --- #
 
 @app.on_chat_member_updated(filters.group, group=10)
 async def member_join_handler(_, member: ChatMemberUpdated):
@@ -129,7 +132,7 @@ async def member_join_handler(_, member: ChatMemberUpdated):
         )
 
         if os.path.exists(welcome_img): os.remove(welcome_img)
-        if os.path.exists(u_pfp_path) and "assets/" not in u_pfp_path: os.remove(u_pfp_path)
+        if u_pfp_path and os.path.exists(u_pfp_path) and "assets/" not in u_pfp_path: os.remove(u_pfp_path)
 
 @app.on_message(filters.command("welcome") & ~filters.private)
 async def welcome_toggle(_, m):
