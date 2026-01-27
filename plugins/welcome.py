@@ -110,7 +110,7 @@ async def member_join_handler(_, member: ChatMemberUpdated):
 
     if card:
         caption = (
-            f"ㅤㅤㅤㅤ◦•●◉✿ ᴡᴇʟᴄᴏᴍᴇ ʙᴀʙʏ ✿◉●•◦\n"
+            f"◦•●◉✿ ᴡᴇʟᴄᴏᴍᴇ ʙᴀʙʏ ✿◉●•◦\n"
             f"▰▱▱▱▱▱▱▱▱▱▱▱▱▱▰\n\n"
             f"● ɴᴀᴍᴇ ➥ {user.mention}\n"
             f"● ᴜsᴇʀɴᴀᴍᴇ ➥ {u_username}\n"
