@@ -38,7 +38,7 @@ HELP_TEXT = """
 ๏ `/deltoken` : **REMOVE** your token from the bot's database.
 
 📤 **2. UPLOADING FILES**
-๏ `/upload <repo>` : Reply to a file/zip to upload.
+๏ `/upload <repo>` : Reply to a file or **.zip** archive.
    *(Note: .zip files are extracted automatically)*
 ๏ `/upload <repo> <new_name>` : Upload with a custom name.
 ๏ `/upload <repo> public` : Create a public repo and upload.
@@ -68,7 +68,7 @@ async def start_handler(_, message: Message):
         "them directly to your GitHub repositories.\n\n"
         "**Usage:**\n"
         "1. Set your token: `/settoken <your_token>`\n"
-        "2. Reply to a file: `/upload <repo_name>`\n\n"
+        "2. Reply to a file/zip: `/upload <repo_name>`\n\n"
         "Use /help for more info."
     )
 
@@ -93,15 +93,12 @@ async def set_token_cmd(_, message: Message):
 
 @app.on_message(filters.command("deltoken"))
 async def del_token_cmd(_, message: Message):
-    # This feature removes the token from the database
     user_id = message.from_user.id
     check = await tokens_col.find_one({"user_id": user_id})
-    
     if not check:
         return await message.reply_text("❌ You don't have any token saved to delete.")
-        
     await tokens_col.delete_one({"user_id": user_id})
-    await message.reply_text("🗑️ **Deleted:** Your GitHub token has been removed from the database. I can no longer access your account.")
+    await message.reply_text("🗑️ **Deleted:** Your GitHub token has been removed from the database.")
 
 # --- CORE UPLOAD & ZIP EXTRACTION ---
 
@@ -122,7 +119,7 @@ async def github_upload(_, message: Message):
     repo_name = message.command[1]
     extra_arg = message.command[2] if len(message.command) > 2 else None
 
-    status = await message.reply_text("⏳ **Analyzing request...**")
+    status = await message.reply_text("⏳ **Initializing...**")
     
     try:
         g = Github(token)
@@ -136,21 +133,21 @@ async def github_upload(_, message: Message):
             repo = user.create_repo(repo_name, private=is_priv)
             await status.edit(f"🔨 **Created new repo:** `{repo_name}`")
 
-        # Download from Telegram
-        await status.edit("📥 **Downloading file from Telegram...**")
+        # Download
+        await status.edit("📥 **Downloading from Telegram...**")
         file_path = await message.reply_to_message.download()
         
-        # --- ZIP EXTRACTION & UPLOAD ---
+        # --- ZIP EXTRACTION LOGIC ---
         if file_path.endswith(".zip") and extra_arg not in ["public", "private"]:
             extract_dir = f"work_{user_id}"
             if os.path.exists(extract_dir): shutil.rmtree(extract_dir)
             os.makedirs(extract_dir)
             
-            await status.edit("📦 **Extracting ZIP folder...**")
+            await status.edit("📦 **Extracting ZIP contents...**")
             with zipfile.ZipFile(file_path, 'r') as zip_ref:
                 zip_ref.extractall(extract_dir)
             
-            await status.edit("🚀 **Uploading all files to GitHub...**")
+            await status.edit("🚀 **Uploading files individually to GitHub...**")
             count = 0
             for root, _, files in os.walk(extract_dir):
                 for f in files:
@@ -159,6 +156,7 @@ async def github_upload(_, message: Message):
                     with open(local_p, "rb") as df:
                         content = df.read()
                     try:
+                        # Update if exists, else create
                         old = repo.get_contents(git_p)
                         repo.update_file(old.path, f"Update {git_p}", content, old.sha)
                     except:
@@ -186,7 +184,7 @@ async def github_upload(_, message: Message):
     except Exception as e:
         await status.edit(f"❌ **GitHub Error:** `{str(e)}`")
 
-# --- TOOLS ---
+# --- OTHER TOOLS ---
 
 @app.on_message(filters.command("rename_module"))
 async def rename_mod_cmd(_, message: Message):
@@ -201,16 +199,6 @@ async def rename_mod_cmd(_, message: Message):
         repo.create_file(new_p, f"Rename {old_p}", file.decoded_content)
         repo.delete_file(file.path, f"Delete old {old_p}", file.sha)
         await message.reply_text(f"✅ **Renamed:** `{old_p}` ➜ `{new_p}`")
-    except Exception as e: await message.reply_text(f"❌ **Error:** {e}")
-
-@app.on_message(filters.command("setwebhook"))
-async def set_webhook_cmd(_, message: Message):
-    token = await get_token(message.from_user.id)
-    if not token or len(message.command) < 3: return
-    try:
-        repo = Github(token).get_user().get_repo(message.command[1])
-        repo.create_hook("web", {"url": message.command[2], "content_type": "json"}, ["push"], active=True)
-        await message.reply_text("✅ **Webhook created successfully!**")
     except Exception as e: await message.reply_text(f"❌ **Error:** {e}")
 
 __MODULE__ = "Rᴇᴘᴏ"
