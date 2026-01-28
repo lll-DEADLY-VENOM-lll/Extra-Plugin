@@ -1,206 +1,201 @@
 import os
-import shutil
 from pyrogram import filters
 from pyrogram.types import Message
 from github import Github
 from github.GithubException import GithubException
+from motor.motor_asyncio import AsyncIOMotorClient
 
-from VIPMUSIC import app
+# Import your app instance
+from VIPMUSIC import app 
 
-# --- CONFIG & STORAGE (Use MongoDB for production) ---
-user_tokens = {}  # {user_id: "token"}
-authorized_users = set()  # {user_id}
-OWNER_ID = 12345678  # Replace with your actual Telegram User ID
+# --- CONFIGURATION ---
+# Replace with your actual MongoDB URL
+MONGO_DB_URL = "your_mongodb_url_here" 
 
-# --- HELP GUIDE (Your exact text) ---
-HELP_TEXT = """
-🧠 ɢɪᴛʜᴜʙ ᴜᴘʟᴏᴀᴅᴇʀ ʙᴏᴛ — ʜᴇʟᴘ ɢᴜɪᴅᴇ
+# --- DATABASE SETUP ---
+mongo_client = AsyncIOMotorClient(MONGO_DB_URL)
+db = mongo_client["GitHubBot"]
+tokens_col = db["user_tokens"]
+
+# --- HELP TEXT ---
+HELP_GUIDE = """
+🧠 **GITHUB UPLOADER BOT - HELP MENU**
 ━━━━━━━━━━━━━━━━━━━━━━
 
-📘 **Usage (Upload/Update):**
-━━━━━━━━━━━━━━━━━━━━━━
-๏ **Default Upload:**
-   → `/upload <repo_name>`
+🔐 **TOKEN SETUP**
+๏ `/settoken <your_token>` : Save your GitHub Personal Access Token.
+๏ `/deltoken` : Delete your token from the database.
 
-๏ **Rename/Path Upload:**
-   → `/upload <repo> <new_file/path.ext>`
+📤 **UPLOADING**
+๏ `/upload <repo_name>` : Reply to any file/zip to upload.
+๏ `/upload <repo> <path/name.ext>` : Upload with a specific name or path.
+๏ `/upload <repo> public` : Create a new public repo and upload.
+๏ `/upload <repo> private` : Create a new private repo and upload.
 
-๏ **Module/Folder Rename (Global):**
-   → `/rename_module <repo> <old_path> <new_path>`
+🛠 **MANAGEMENT**
+๏ `/rename_module <repo> <old_path> <new_path>` : Rename/Move files on GitHub.
+๏ `/setwebhook <repo> <url>` : Setup a Push Webhook.
+๏ `/delwebhook <repo>` : Remove all webhooks from a repo.
 
-๏ **Create Repo + Upload:**
-   → `/upload <repo> public` (or private)
-
-๏ **Interactive Upload:**
-   → `/upload`
-
-━━━━━━━━━━━━━━━━━━━━━━
-🛠️ **Automation & Webhooks**
-━━━━━━━━━━━━━━━━━━━━━━
-๏ **Set Webhook (Auto-Deployment):**
-   → `/setwebhook <repo> <url>`
-๏ **Delete Webhook:**
-   → `/delwebhook <repo>`
-
-🔐 **Access & Token Setup**
-━━━━━━━━━━━━━━━━━━━━━━
-๏ **Set Token:**
-   → `/settoken <your_github_token>`
-๏ **Grant Access to others:**
-   → `/access [reply to user]`
-๏ **Revoke Access:**
-   → `/revoke [reply to user]`
-๏ **List Access:**
-   → `/listaccess`
-๏ **Generate GitHub Token:**
-   → [Click Here](https://github.com/settings/tokens)
+🚀 *This bot is public. Everyone must use their own GitHub token.*
 ━━━━━━━━━━━━━━━━━━━━━━
 """
 
-# --- HELPERS ---
-def is_auth(user_id):
-    return user_id == OWNER_ID or user_id in authorized_users
+# --- DATABASE FUNCTIONS ---
+async def save_user_token(user_id, token):
+    await tokens_col.update_one({"user_id": user_id}, {"$set": {"token": token}}, upsert=True)
 
-# --- COMMANDS ---
+async def get_user_token(user_id):
+    result = await tokens_col.find_one({"user_id": user_id})
+    return result["token"] if result else None
+
+async def delete_user_token(user_id):
+    await tokens_col.delete_one({"user_id": user_id})
+
+# --- BASIC COMMANDS ---
 
 @app.on_message(filters.command("start"))
-async def start_cmd(_, message: Message):
-    name = message.from_user.first_name
-    await message.reply_text(f"""
-👋 ʜᴇʟʟᴏ {name}!
-
-🤖 ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ᴛʜᴇ ɢɪᴛʜᴜʙ ᴜᴘʟᴏᴀᴅᴇʀ ʙᴏᴛ
-━━━━━━━━━━━━━━━━━━━━━━
-📤 ᴛʜɪs ʙᴏᴛ ʜᴇʟᴘs ʏᴏᴜ ᴜᴘʟᴏᴀᴅ:
-• ғɪʟᴇs
-• ғᴏʟᴅᴇʀs (.zip)
-• ᴘʀᴏᴊᴇᴄᴛs
-ᴅɪʀᴇᴄᴛʟʏ ᴛᴏ ʏᴏᴜʀ ɢɪᴛʜᴜʙ ʀᴇᴘᴏ 🚀
-━━━━━━━━━━━━━━━━━━━━━━
-{HELP_TEXT}
-""", disable_web_page_preview=True)
+async def start_handler(_, message: Message):
+    await message.reply_text(
+        f"👋 **Hello {message.from_user.first_name}!**\n\n"
+        "I am a GitHub Uploader Bot. I can upload files directly to your repositories.\n\n"
+        "**To get started:**\n"
+        "1. Get your token from [GitHub Settings](https://github.com/settings/tokens)\n"
+        "2. Use `/settoken <your_token>`\n"
+        "3. Reply to any file with `/upload <repo_name>`",
+        disable_web_page_preview=True
+    )
 
 @app.on_message(filters.command("help"))
-async def help_cmd(_, message: Message):
-    await message.reply_text(HELP_TEXT, disable_web_page_preview=True)
+async def help_handler(_, message: Message):
+    await message.reply_text(HELP_GUIDE, disable_web_page_preview=True)
 
-# --- TOKEN & ACCESS ---
+# --- TOKEN MANAGEMENT ---
 
 @app.on_message(filters.command("settoken"))
-async def set_token(_, message: Message):
+async def set_token_handler(_, message: Message):
     if len(message.command) < 2:
-        return await message.reply_text("Usage: `/settoken your_github_token`")
-    user_tokens[message.from_user.id] = message.command[1]
-    await message.reply_text("✅ GitHub Token saved successfully!")
-
-@app.on_message(filters.command("access") & filters.user(OWNER_ID))
-async def grant_access(_, message: Message):
-    user_id = None
-    if message.reply_to_message:
-        user_id = message.reply_to_message.from_user.id
-    elif len(message.command) > 1:
-        user_id = int(message.command[1])
+        return await message.reply_text("❌ **Usage:** `/settoken <github_token>`")
     
-    if user_id:
-        authorized_users.add(user_id)
-        await message.reply_text(f"✅ Access granted to `{user_id}`")
+    token = message.command[1]
+    await save_user_token(message.from_user.id, token)
+    await message.reply_text("✅ **Success:** Your GitHub token has been saved securely!")
 
-@app.on_message(filters.command("listaccess") & filters.user(OWNER_ID))
-async def list_access(_, message: Message):
-    if not authorized_users:
-        return await message.reply_text("No users authorized.")
-    out = "Authorized Users:\n" + "\n".join([f"• `{u}`" for u in authorized_users])
-    await message.reply_text(out)
+@app.on_message(filters.command("deltoken"))
+async def del_token_handler(_, message: Message):
+    await delete_user_token(message.from_user.id)
+    await message.reply_text("🗑️ **Deleted:** Your token has been removed from the database.")
 
-# --- UPLOAD LOGIC ---
+# --- CORE UPLOAD LOGIC ---
 
 @app.on_message(filters.command("upload"))
-async def github_upload(_, message: Message):
+async def upload_handler(_, message: Message):
     user_id = message.from_user.id
-    if not is_auth(user_id):
-        return await message.reply_text("❌ You don't have access to use this bot.")
+    token = await get_user_token(user_id)
     
-    if user_id not in user_tokens:
-        return await message.reply_text("🔑 Please set your token first: `/settoken <token>`")
+    if not token:
+        return await message.reply_text("🔑 **Access Denied:** Please set your token first using `/settoken`.")
 
-    if not message.reply_to_message or not message.reply_to_message.document:
-        return await message.reply_text("Reply to a file/zip with `/upload <repo_name>`")
+    if not message.reply_to_message or not (message.reply_to_message.document or message.reply_to_message.audio or message.reply_to_message.video):
+        return await message.reply_text("❌ **Error:** Please reply to a file or document with `/upload <repo_name>`")
 
-    # Parsing arguments
-    args = message.command
-    repo_name = args[1] if len(args) > 1 else None
-    new_name = args[2] if len(args) > 2 else None # Could be 'public' or a filename
+    if len(message.command) < 2:
+        return await message.reply_text("❌ **Usage:** `/upload <repository_name>`")
 
-    if not repo_name:
-        return await message.reply_text("Please provide a repository name.")
+    repo_name = message.command[1]
+    new_name_arg = message.command[2] if len(message.command) > 2 else None
 
-    msg = await message.reply_text("🚀 Starting upload process...")
+    status_msg = await message.reply_text("⏳ **Processing...**")
     
     try:
-        g = Github(user_tokens[user_id])
+        g = Github(token)
         user = g.get_user()
         
-        # Repo Check/Creation
+        # Repository Management
         try:
             repo = user.get_repo(repo_name)
-        except:
-            is_private = True if new_name == "private" else False
+        except Exception:
+            is_private = True if new_name_arg == "private" else False
             repo = user.create_repo(repo_name, private=is_private)
-            await msg.edit(f"🔨 Created new {'private' if is_private else 'public'} repo: {repo_name}")
+            await status_msg.edit(f"🔨 **Created new {'private' if is_private else 'public'} repo:** `{repo_name}`")
 
+        # Downloading file from Telegram
+        await status_msg.edit("📥 **Downloading file to server...**")
         file_path = await message.reply_to_message.download()
-        filename = new_name if (new_name and "." in new_name) else os.path.basename(file_path)
+        
+        # Logic for filename/path
+        filename = new_name_arg if (new_name_arg and "." in new_name_arg) else os.path.basename(file_path)
 
         with open(file_path, "rb") as f:
             content = f.read()
 
+        # Upload or Update
         try:
             contents = repo.get_contents(filename)
-            repo.update_file(contents.path, f"Update {filename}", content, contents.sha)
-            await msg.edit(f"✅ Updated `{filename}` in `{repo_name}`")
-        except:
-            repo.create_file(filename, f"Upload {filename}", content)
-            await msg.edit(f"🚀 Uploaded `{filename}` to `{repo_name}`\n🔗 {repo.html_url}")
+            repo.update_file(contents.path, f"Update {filename} via Bot", content, contents.sha)
+            await status_msg.edit(f"✅ **Updated:** `{filename}` in `{repo_name}`")
+        except Exception:
+            repo.create_file(filename, f"Upload {filename} via Bot", content)
+            await status_msg.edit(f"🚀 **Uploaded:** `{filename}` to `{repo_name}`\n🔗 [View Repo]({repo.html_url})", disable_web_page_preview=True)
 
-        os.remove(file_path)
+        if os.path.exists(file_path):
+            os.remove(file_path)
 
     except Exception as e:
-        await msg.edit(f"❌ Error: {str(e)}")
+        await status_msg.edit(f"❌ **GitHub Error:** `{str(e)}`")
 
-# --- REPO MANAGEMENT ---
+# --- ADVANCED REPO TOOLS ---
 
 @app.on_message(filters.command("rename_module"))
-async def rename_module(_, message: Message):
-    if not is_auth(message.from_user.id): return
-    if len(message.command) < 4:
+async def rename_handler(_, message: Message):
+    token = await get_user_token(message.from_user.id)
+    if not token or len(message.command) < 4:
         return await message.reply_text("Usage: `/rename_module <repo> <old_path> <new_path>`")
 
-    repo_name, old_p, new_p = message.command[1], message.command[2], message.command[3]
+    repo_name, old_path, new_path = message.command[1], message.command[2], message.command[3]
     try:
-        g = Github(user_tokens[message.from_user.id])
+        g = Github(token)
         repo = g.get_user().get_repo(repo_name)
-        file = repo.get_contents(old_p)
-        repo.create_file(new_p, f"Rename {old_p} to {new_p}", file.decoded_content)
-        repo.delete_file(file.path, f"Remove old {old_p}", file.sha)
-        await message.reply_text(f"✅ Renamed `{old_p}` to `{new_p}`")
+        file_content = repo.get_contents(old_path)
+        repo.create_file(new_path, f"Rename {old_path} to {new_path}", file_content.decoded_content)
+        repo.delete_file(file_content.path, f"Remove old {old_path}", file_content.sha)
+        await message.reply_text(f"✅ **Renamed:** `{old_path}` ➜ `{new_path}`")
     except Exception as e:
-        await message.reply_text(f"❌ Error: {e}")
+        await message.reply_text(f"❌ **Error:** `{e}`")
 
 @app.on_message(filters.command("setwebhook"))
-async def set_webhook(_, message: Message):
-    if not is_auth(message.from_user.id): return
-    if len(message.command) < 3:
+async def webhook_handler(_, message: Message):
+    token = await get_user_token(message.from_user.id)
+    if not token or len(message.command) < 3:
         return await message.reply_text("Usage: `/setwebhook <repo> <url>`")
     
-    repo_name, url = message.command[1], message.command[2]
+    repo_name, webhook_url = message.command[1], message.command[2]
     try:
-        g = Github(user_tokens[message.from_user.id])
+        g = Github(token)
         repo = g.get_user().get_repo(repo_name)
-        config = {"url": url, "content_type": "json"}
+        config = {"url": webhook_url, "content_type": "json"}
         repo.create_hook("web", config, ["push"], active=True)
-        await message.reply_text(f"✅ Webhook set for `{repo_name}`")
+        await message.reply_text(f"✅ **Webhook set** for `{repo_name}`")
     except Exception as e:
-        await message.reply_text(f"❌ Error: {e}")
+        await message.reply_text(f"❌ **Error:** `{e}`")
+
+@app.on_message(filters.command("delwebhook"))
+async def del_webhook_handler(_, message: Message):
+    token = await get_user_token(message.from_user.id)
+    if not token or len(message.command) < 2:
+        return await message.reply_text("Usage: `/delwebhook <repo>`")
+    
+    repo_name = message.command[1]
+    try:
+        g = Github(token)
+        repo = g.get_user().get_repo(repo_name)
+        for hook in repo.get_hooks():
+            hook.delete()
+        await message.reply_text(f"✅ **All webhooks deleted** for `{repo_name}`")
+    except Exception as e:
+        await message.reply_text(f"❌ **Error:** `{e}`")
+
+# --- MODULE INFO FOR HELP MENU ---
 
 __MODULE__ = "Rᴇᴘᴏ"
-__HELP__ = HELP_TEXT
+__HELP__ = HELP_GUIDE
