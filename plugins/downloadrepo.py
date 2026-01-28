@@ -10,7 +10,7 @@ from VIPMUSIC import app
 
 # --- CONFIGURATION ---
 # Replace with your actual MongoDB URL
-MONGO_DB_URL = "your_mongodb_url_here" 
+MONGO_DB_URL = "mongodb+srv://vishalpandeynkp:Bal6Y6FZeQeoAoqV@cluster0.dzgwt.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0" 
 
 # --- DATABASE SETUP ---
 mongo_client = AsyncIOMotorClient(MONGO_DB_URL)
