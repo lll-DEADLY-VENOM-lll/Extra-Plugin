@@ -27,73 +27,42 @@ if MONGO_DB_URL:
 
 # --- BEAUTIFIED HELP GUIDE ---
 HELP_TEXT = """
-🧠 **GITHUB UPLOADER BOT — HELP GUIDE**
+🧠 **GITHUB UPLOADER BOT — 404 FIXED**
 ━━━━━━━━━━━━━━━━━━━━━━
-🚀 **Status:** Public (Anyone can use)
+🚀 **Auto-Create Repo feature is now active.**
 
-🔐 **1. TOKEN SETTINGS**
-๏ `/settoken <token>` : Save your GitHub Token.
-๏ `/deltoken` : Delete your token from database.
-๏ **Generate Token:** [Click Here to Create](https://github.com/settings/tokens)
-   *(Note: Select 'repo' permissions while creating)*
+🔐 **COMMANDS:**
+๏ `/settoken <token>` : Save your Token.
+๏ `/deltoken` : Delete your Token.
+๏ **Generate Token:** [Click Here](https://github.com/settings/tokens)
 
-📤 **2. UPLOADING FILES**
-๏ `/upload <repo>` : Reply to a zip to upload to **ROOT**.
-   *(Auto-skips the extra parent folder inside ZIP)*
-๏ `/upload <repo> <new_name>` : Upload with custom name.
-
-🛠️ **3. REPOSITORY TOOLS**
-๏ `/rename_module <repo> <old_path> <new_path>` : Rename files.
-๏ `/setwebhook <repo> <url>` : Create a push webhook.
-
+📤 **UPLOADING:**
+๏ `/upload <repo>` : Upload to ROOT. 
+   *(If repo doesn't exist, I will create it!)*
 ━━━━━━━━━━━━━━━━━━━━━━
 """
 
-# --- DATABASE HELPERS ---
 async def get_token(user_id):
     if not MONGO_DB_URL: return None
     res = await tokens_col.find_one({"user_id": user_id})
     return res["token"] if res else None
 
-# --- PUBLIC COMMANDS ---
-
-@app.on_message(filters.command("start"))
-async def start_handler(_, message: Message):
-    await message.reply_text(
-        f"👋 **Hello {message.from_user.first_name}!**\n\n"
-        "I am a GitHub Uploader. I can extract .zip files and upload "
-        "them directly to the **Root Directory** of your repo.\n\n"
-        "**Steps to use:**\n"
-        "1️⃣ Create a token: [Click Here](https://github.com/settings/tokens)\n"
-        "2️⃣ Set it: `/settoken your_token`\n"
-        "3️⃣ Reply to a zip: `/upload your_repo_name`\n\n"
-        "Use /help for more info.",
-        disable_web_page_preview=True
-    )
-
-@app.on_message(filters.command("help"))
+@app.on_message(filters.command(["start", "help"]))
 async def help_handler(_, message: Message):
     await message.reply_text(HELP_TEXT, disable_web_page_preview=True)
 
 @app.on_message(filters.command("settoken"))
 async def set_token_cmd(_, message: Message):
-    if len(message.command) < 2:
-        return await message.reply_text("❌ **Usage:** `/settoken <your_github_token>`")
-    
-    token = message.command[1]
-    await tokens_col.update_one(
-        {"user_id": message.from_user.id}, 
-        {"$set": {"token": token}}, 
-        upsert=True
-    )
-    await message.reply_text("✅ **Success:** Your GitHub Token has been saved!")
+    if len(message.command) < 2: return
+    await tokens_col.update_one({"user_id": message.from_user.id}, {"$set": {"token": message.command[1]}}, upsert=True)
+    await message.reply_text("✅ Token saved!")
 
 @app.on_message(filters.command("deltoken"))
 async def del_token_cmd(_, message: Message):
     await tokens_col.delete_one({"user_id": message.from_user.id})
-    await message.reply_text("🗑️ **Deleted:** Your token has been removed.")
+    await message.reply_text("🗑️ Token removed.")
 
-# --- CORE UPLOAD LOGIC (WITH SHA FIX & ROOT FIX) ---
+# --- CORE UPLOAD LOGIC (WITH AUTO-CREATE REPO FIX) ---
 
 @app.on_message(filters.command("upload"))
 async def github_upload(_, message: Message):
@@ -101,22 +70,34 @@ async def github_upload(_, message: Message):
     token = await get_token(user_id)
     
     if not token:
-        return await message.reply_text("🔑 **Access Denied:** Please set your token first using `/settoken`.")
+        return await message.reply_text("🔑 Set token first using `/settoken`.")
 
     if not message.reply_to_message or not message.reply_to_message.document:
-        return await message.reply_text("❌ **Error:** Please reply to a **.zip** folder.")
+        return await message.reply_text("❌ Reply to a **.zip** file.")
 
     if len(message.command) < 2:
-        return await message.reply_text("❌ **Usage:** `/upload <repo_name>`")
+        return await message.reply_text("❌ Usage: `/upload <repo_name>`")
     
     repo_name = message.command[1]
-    status = await message.reply_text("⏳ **Initializing Root Upload...**")
+    status = await message.reply_text("⏳ **Connecting to GitHub...**")
     
     try:
         g = Github(token)
         user = g.get_user()
-        repo = user.get_repo(repo_name)
+        
+        # --- FIXED: AUTO-CREATE REPO ON 404 ---
+        try:
+            repo = user.get_repo(repo_name)
+        except Exception as e:
+            if "404" in str(e):
+                await status.edit(f"🔨 Repo `{repo_name}` not found. Creating it for you...")
+                repo = user.create_repo(repo_name, auto_init=True)
+                time.sleep(2) # Wait for GitHub to initialize
+            else:
+                raise e
 
+        # Download file
+        await status.edit("📥 **Downloading from Telegram...**")
         file_path = await message.reply_to_message.download()
         
         if file_path.endswith(".zip"):
@@ -127,13 +108,13 @@ async def github_upload(_, message: Message):
             with zipfile.ZipFile(file_path, 'r') as zip_ref:
                 zip_ref.extractall(extract_dir)
 
-            # Skip parent folder if ZIP contains only one folder
+            # Skip parent folder logic
             contents = os.listdir(extract_dir)
             upload_from = extract_dir
             if len(contents) == 1 and os.path.isdir(os.path.join(extract_dir, contents[0])):
                 upload_from = os.path.join(extract_dir, contents[0])
 
-            await status.edit("🚀 **Uploading files to Root (SHA Fix enabled)...**")
+            await status.edit("🚀 **Uploading files to GitHub Root...**")
             count = 0
             for root, _, files in os.walk(upload_from):
                 for f in files:
@@ -143,25 +124,25 @@ async def github_upload(_, message: Message):
                     with open(local_p, "rb") as df:
                         content = df.read()
                     
-                    # Upload with 409 Conflict Retry Logic
+                    # Upload with SHA Conflict Fix (409)
                     try:
                         try:
                             old = repo.get_contents(git_p)
                             repo.update_file(old.path, f"Update {git_p}", content, old.sha)
-                        except Exception as e:
-                            if "404" in str(e):
+                        except Exception as up_e:
+                            if "404" in str(up_e):
                                 repo.create_file(git_p, f"Upload {git_p}", content)
-                            elif "409" in str(e):
-                                # Re-fetch SHA and retry
+                            elif "409" in str(up_e):
+                                # Re-fetch SHA on conflict
                                 old = repo.get_contents(git_p)
                                 repo.update_file(old.path, f"Fix: {git_p}", content, old.sha)
                             else:
-                                raise e
+                                raise up_e
                         count += 1
-                    except Exception as upload_err:
-                        print(f"Failed {git_p}: {upload_err}")
+                    except Exception as fatal:
+                        print(f"Failed {git_p}: {fatal}")
             
-            await status.edit(f"✅ **Root Upload Success!**\n📦 Total `{count}` files uploaded to `{repo_name}` front page.")
+            await status.edit(f"✅ **Upload Success!**\n📦 Total `{count}` files added to `{repo_name}`.\n🔗 [View Repo]({repo.html_url})", disable_web_page_preview=True)
             shutil.rmtree(extract_dir)
         
         else:
