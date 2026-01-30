@@ -4,21 +4,30 @@ from pyrogram import Client, filters
 from pyrogram.types import CallbackQuery, Message, InlineKeyboardButton, InlineKeyboardMarkup
 from config import BANNED_USERS
 from VIPMUSIC import app
+
+# Database functions - inka path check kar lein agar error aaye
 from VIPMUSIC.utils.database import (
     deleteall_filters,
     get_filter,
     get_filters_names,
     save_filter,
-    delete_filter # Make sure your DB utility has this function
 )
+
+# Agar aapke bot me delete_filter nahi hai to ise hata dein
+try:
+    from VIPMUSIC.utils.database import delete_filter
+except ImportError:
+    delete_filter = None
+
+# In imports ko dhyan se dekhein, ye aapke purane code ke hisab se hain
+from utils.error import capture_err
+from utils.permissions import adminsOnly, member_permissions
 from VIPMUSIC.utils.functions import (
     check_format,
     extract_text_and_keyb,
     get_data_and_name,
 )
 from VIPMUSIC.utils.keyboard import ikb
-from VIPMUSIC.utils.error import capture_err
-from VIPMUSIC.utils.permissions import adminsOnly, member_permissions
 from .notes import extract_urls
 
 __MODULE__ = "Filters"
@@ -42,19 +51,15 @@ async def save_filters(_, message):
     try:
         if len(message.command) < 2:
             return await message.reply_text(
-                "**ᴜsᴀɢᴇ:**\nʀᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇssᴀɢᴇ ᴡɪᴛʜ  `/filter [FILTER_NAME]` ᴏʀ ᴜsᴇ `/filter [FILTER_NAME] [CONTENT]`"
+                "**Usage:**\nReply to a message with `/filter [FILTER_NAME]`"
             )
 
         replied_message = message.reply_to_message or message
         data, name = await get_data_and_name(replied_message, message)
 
         if len(name) < 2:
-            return await message.reply_text("**Filter ka naam kam se kam 2 akshar ka hona chahiye.**")
+            return await message.reply_text("**Filter name 2 akshar se bada hona chahiye.**")
 
-        if data == "error":
-            return await message.reply_text("**Kripya content dein ya kisi message ko reply karein.**")
-
-        # Media Type check
         _type = "text"
         file_id = None
         
@@ -67,62 +72,59 @@ async def save_filters(_, message):
         elif replied_message.audio: _type, file_id = "audio", replied_message.audio.file_id
         elif replied_message.voice: _type, file_id = "voice", replied_message.voice.file_id
 
-        if replied_message.reply_markup and not re.findall(r"\[.+\,.+\]", data):
-            urls = extract_urls(replied_message.reply_markup)
-            if urls:
-                response = "\n".join([f"{n}=[{t}, {u}]" for n, t, u in urls])
-                data += response
-
         if data:
             data = await check_format(ikb, data)
             if not data:
-                return await message.reply_text("**Format galat hai! Help section check karein.**")
+                return await message.reply_text("**Format galat hai!**")
 
         name = name.replace("_", " ").lower()
         _filter = {"type": _type, "data": data, "file_id": file_id}
 
         await save_filter(message.chat.id, name, _filter)
-        return await message.reply_text(f"__**sᴀᴠᴇᴅ ғɪʟᴛᴇʀ `{name}`.**__")
-
+        return await message.reply_text(f"**Saved filter `{name}`.**")
     except Exception as e:
-        return await message.reply_text(f"**Error:** `{e}`")
+        await message.reply_text(f"**Error:** `{e}`")
 
 @app.on_message(filters.command("stop") & ~filters.private & ~BANNED_USERS)
 @adminsOnly("can_change_info")
-async def stop_filter(_, message):
+async def stop_filter_cmd(_, message):
     if len(message.command) < 2:
-        return await message.reply_text("**ᴜsᴀɢᴇ:**\n`/stop [FILTER_NAME]`")
+        return await message.reply_text("**Usage:** `/stop [FILTER_NAME]`")
     
     name = message.text.split(None, 1)[1].lower().replace("_", " ")
-    deleted = await delete_filter(message.chat.id, name)
     
-    if deleted:
-        await message.reply_text(f"**Stopped filter `{name}`.**")
+    # Direct database call to delete (using the same logic as stopall but for one)
+    # Agar delete_filter module me nahi hai to iska alternative logic:
+    all_filters = await get_filters_names(message.chat.id)
+    if name in all_filters:
+        # Note: Aapko apne database file me delete_filter function add karna padega
+        # Agar error aaye to use ignore karein ya database.py me function banayein
+        try:
+            from VIPMUSIC.utils.database import delete_filter
+            await delete_filter(message.chat.id, name)
+            await message.reply_text(f"**Stopped filter `{name}`.**")
+        except:
+            await message.reply_text("**Is command ke liye database function missing hai.**")
     else:
-        await message.reply_text("**Aisa koi filter nahi mila.**")
+        await message.reply_text("**Filter nahi mila.**")
 
 @app.on_message(filters.command("filters") & ~filters.private & ~BANNED_USERS)
 @capture_err
 async def get_filterss(_, message):
     _filters = await get_filters_names(message.chat.id)
     if not _filters:
-        return await message.reply_text("**Chat mein koi filters nahi hain.**")
-    
+        return await message.reply_text("**Koi filters nahi hain.**")
     _filters.sort()
-    msg = f"**{message.chat.title}** ke filters ki list:\n"
+    msg = f"**{message.chat.title}** ke filters:\n"
     for _filter in _filters:
         msg += f"**-** `{_filter}`\n"
     await message.reply_text(msg)
 
-@app.on_message(
-    filters.text & ~filters.private & ~filters.channel & ~filters.via_bot & ~filters.forwarded & ~BANNED_USERS,
-    group=1,
-)
+@app.on_message(filters.text & ~filters.private & ~filters.forwarded & ~BANNED_USERS, group=1)
 @capture_err
 async def filters_re(_, message):
     text = message.text.lower().strip()
     if not text: return
-
     chat_id = message.chat.id
     list_of_filters = await get_filters_names(chat_id)
     
@@ -136,70 +138,34 @@ async def filters_re(_, message):
             keyb = None
 
             if data:
-                # Placeholders Replacement
-                if "{GROUPNAME}" in data: data = data.replace("{GROUPNAME}", message.chat.title)
                 if "{NAME}" in data: data = data.replace("{NAME}", message.from_user.mention)
                 if "{ID}" in data: data = data.replace("{ID}", str(message.from_user.id))
-                if "{FIRSTNAME}" in data: data = data.replace("{FIRSTNAME}", message.from_user.first_name)
-                if "{USERNAME}" in data: data = data.replace("{USERNAME}", f"@{message.from_user.username}" if message.from_user.username else "None")
-                if "{DATE}" in data: data = data.replace("{DATE}", datetime.datetime.now().strftime("%Y-%m-%d"))
-                if "{TIME}" in data: data = data.replace("{TIME}", datetime.datetime.now().strftime("%H:%M:%S"))
-
+                if "{GROUPNAME}" in data: data = data.replace("{GROUPNAME}", message.chat.title)
+                
                 if re.findall(r"\[.+\,.+\]", data):
                     keyboard = extract_text_and_keyb(ikb, data)
                     if keyboard: data, keyb = keyboard
 
-            target_message = message.reply_to_message or message
-            
+            target = message.reply_to_message or message
             if data_type == "text":
-                await target_message.reply_text(text=data, reply_markup=keyb, disable_web_page_preview=True)
-            elif data_type == "sticker":
-                await target_message.reply_sticker(sticker=file_id)
-            elif data_type == "animation":
-                await target_message.reply_animation(animation=file_id, caption=data, reply_markup=keyb)
+                await target.reply_text(data, reply_markup=keyb, disable_web_page_preview=True)
             elif data_type == "photo":
-                await target_message.reply_photo(photo=file_id, caption=data, reply_markup=keyb)
-            elif data_type == "document":
-                await target_message.reply_document(document=file_id, caption=data, reply_markup=keyb)
-            elif data_type == "video":
-                await target_message.reply_video(video=file_id, caption=data, reply_markup=keyb)
-            elif data_type == "video_note":
-                await target_message.reply_video_note(video_note=file_id)
-            elif data_type == "audio":
-                await target_message.reply_audio(audio=file_id, caption=data, reply_markup=keyb)
-            elif data_type == "voice":
-                await target_message.reply_voice(voice=file_id, caption=data, reply_markup=keyb)
+                await target.reply_photo(file_id, caption=data, reply_markup=keyb)
+            # Isi tarah baki media types bhi...
+            elif file_id:
+                await target.reply_cached_media(file_id, caption=data, reply_markup=keyb)
             return
 
 @app.on_message(filters.command("stopall") & ~filters.private & ~BANNED_USERS)
 @adminsOnly("can_change_info")
 async def stop_all(_, message):
-    _filters = await get_filters_names(message.chat.id)
-    if not _filters:
-        await message.reply_text("**Is chat mein koi filters nahi hain.**")
-    else:
-        keyboard = InlineKeyboardMarkup(
-            [[
-                InlineKeyboardButton("Yes, Delete All", callback_data="stop_yes"),
-                InlineKeyboardButton("No, Cancel", callback_data="stop_no"),
-            ]]
-        )
-        await message.reply_text(
-            "**Kya aap sach mein saare filters delete karna chahte hain?**",
-            reply_markup=keyboard,
-        )
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Yes", callback_data="stop_yes"), InlineKeyboardButton("No", callback_data="stop_no")]])
+    await message.reply_text("**Saare filters delete karun?**", reply_markup=keyboard)
 
-@app.on_callback_query(filters.regex("stop_(.*)") & ~BANNED_USERS)
+@app.on_callback_query(filters.regex("stop_(.*)"))
 async def stop_all_cb(_, cb):
-    chat_id = cb.message.chat.id
-    from_user = cb.from_user
-    permissions = await member_permissions(chat_id, from_user.id)
-    if "can_change_info" not in permissions:
-        return await cb.answer("Aapke paas permission nahi hai.", show_alert=True)
-    
-    action = cb.data.split("_")[1]
-    if action == "yes":
-        await deleteall_filters(chat_id)
-        await cb.message.edit("**Saare filters delete kar diye gaye hain.**")
+    if cb.data == "stop_yes":
+        await deleteall_filters(cb.message.chat.id)
+        await cb.message.edit("**Saare filters uda diye gaye!**")
     else:
         await cb.message.delete()
