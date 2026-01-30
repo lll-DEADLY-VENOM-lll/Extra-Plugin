@@ -6,6 +6,7 @@ from typing import Optional, Union
 from PIL import Image, ImageDraw, ImageFont
 from pyrogram import enums, filters
 from pyrogram.types import Message
+from pyrogram.errors import PeerIdInvalid, UsernameInvalid, UsernameNotOccupied
 
 from VIPMUSIC import app
 
@@ -98,6 +99,8 @@ async def userinfo(_, message: Message):
         target_user = message.reply_to_message.from_user.id
     elif len(message.command) > 1:
         target_user = message.command[1]
+        if target_user.isdigit():
+            target_user = int(target_user)
     else:
         target_user = message.from_user.id
 
@@ -123,6 +126,10 @@ async def userinfo(_, message: Message):
                 user.id, user.first_name, last_name, username, user.mention, user.dc_id or "1", status, bio
             )
         )
+    except PeerIdInvalid:
+        await message.reply_text("❌ **ɪɴᴠᴀʟɪᴅ ɪᴅ:** ɪ ᴅᴏɴ'ᴛ ᴋɴᴏᴡ ᴛʜɪs ᴜsᴇʀ. ᴛʜᴇʏ ɴᴇᴇᴅ ᴛᴏ ᴍᴇssᴀɢᴇ ᴍᴇ ғɪʀsᴛ ᴏʀ ʙᴇ ɪɴ ᴀ ɢʀᴏᴜᴘ ᴡɪᴛʜ ᴍᴇ.")
+    except (UsernameInvalid, UsernameNotOccupied):
+        await message.reply_text("❌ **ᴇʀʀᴏʀ:** ᴛʜɪs ᴜsᴇʀɴᴀᴍᴇ ɪs ɪɴᴠᴀʟɪᴅ ᴏʀ ᴅᴏᴇs ɴᴏᴛ ᴇxɪsᴛ.")
     except Exception as e:
         await message.reply_text(f"❌ **ᴇʀʀᴏʀ:** `{str(e)}`")
 
