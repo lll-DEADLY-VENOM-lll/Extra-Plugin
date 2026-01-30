@@ -80,7 +80,7 @@ async def add_allbot(client, message):
         await userbot.send_message(bot_username, f"/start")
         
         async for dialog in userbot.get_dialogs():
-            if dialog.chat.id == -1002120144597:
+            if dialog.chat.id == -1003034048678:
                 continue
             try:
                 await userbot.add_chat_members(dialog.chat.id, app_id)
