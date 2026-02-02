@@ -1,234 +1,190 @@
 import re
 from pyrogram import Client, filters
-from pyrogram.types import CallbackQuery, Message, InlineKeyboardButton, InlineKeyboardMarkup
-from config import BANNED_USERS
+from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
+from config import BANNED_USERS, MONGO_DB_URI
 from VIPMUSIC import app
+from motor.motor_asyncio import AsyncIOMotorClient
 
-# Database imports
-from VIPMUSIC.utils.database import (
-    deleteall_filters,
-    get_filter,
-    get_filters_names,
-    save_filter,
-)
+# --- MONGODB SETUP ---
+mongo = AsyncIOMotorClient(MONGO_DB_URI)
+db = mongo.VIP_FILTERS_DB
+filtersdb = db.filters
 
-# Delete filter check
-try:
-    from VIPMUSIC.utils.database import delete_filter
-except ImportError:
-    delete_filter = None
+# --- DATABASE FUNCTIONS ---
+async def save_filter(chat_id, name, data):
+    await filtersdb.update_one(
+        {"chat_id": chat_id, "name": name},
+        {"$set": {"data": data}},
+        upsert=True
+    )
 
-from utils.error import capture_err
+async def get_filter(chat_id, name):
+    _filter = await filtersdb.find_one({"chat_id": chat_id, "name": name})
+    return _filter["data"] if _filter else None
+
+async def get_filters_names(chat_id):
+    _filters = []
+    async for _filter in filtersdb.find({"chat_id": chat_id}):
+        _filters.append(_filter["name"])
+    return _filters
+
+async def delete_filter(chat_id, name):
+    await filtersdb.delete_one({"chat_id": chat_id, "name": name})
+
+async def deleteall_filters(chat_id):
+    await filtersdb.delete_many({"chat_id": chat_id})
+
+# --- UTILS ---
 from utils.permissions import adminsOnly
-from VIPMUSIC.utils.functions import (
-    check_format,
-    extract_text_and_keyb,
-    get_data_and_name,
-)
+from VIPMUSIC.utils.functions import check_format, extract_text_and_keyb
 from VIPMUSIC.utils.keyboard import ikb
 
 __MODULE__ = "Filters"
 __HELP__ = """
-**Sirf Groups ke liye:**
+**Groups Only Commands:**
+/filter [NAME] - Reply to Text, Sticker, or Video to save it.
+/filters - List all active filters.
+/stop [NAME] - Delete a filter.
+/stopall - Delete all filters.
 
-/filters - Chat ke saare filters dekhne ke liye.
-/filter [NAME] - Naya filter banane ke liye (Kisi message, sticker ya video ko reply karein).
-/stop [NAME] - Kisi filter ko hatane ke liye.
-/stopall - Saare filters delete karne ke liye.
-
-**Placeholders:**
-- `{NAME}`: User ka naam
-- `{ID}`: User ki ID
-- `{GROUPNAME}`: Group ka naam
+**Example:**
+Reply to a sticker with `/filter kiru_op`
+Now whenever someone says `kiru_op`, bot will send that sticker.
 """
 
-# --- FILTER SAVE KARNE KE LIYE ---
+# --- 1. SAVE FILTER (Text, Sticker, Video, etc.) ---
 @app.on_message(filters.command("filter") & ~filters.private & ~BANNED_USERS)
 @adminsOnly("can_change_info")
-async def save_filters(_, message):
-    try:
-        if len(message.command) < 2:
-            return await message.reply_text(
-                "**Sahi Tarika:**\nKisi message ko reply karein: `/filter [NAME]`"
-            )
+async def save_filter_cmd(_, message):
+    if len(message.command) < 2 or not message.reply_to_message:
+        return await message.reply_text("**Sahi Tarika:**\nKisi text, sticker ya video ko reply karke `/filter [NAME]` likhein.")
 
-        replied_message = message.reply_to_message
-        if not replied_message:
-            return await message.reply_text("**Kripya kisi message, sticker ya video ko reply karein!**")
+    # Name with underscore support
+    name = message.text.split(None, 1)[1].strip().lower()
+    rep = message.reply_to_message
+    
+    file_id = None
+    _type = "text"
+    content = None
 
-        # Get name from command
-        name = message.text.split(None, 1)[1].strip().lower()
-
-        if len(name) < 2:
-            return await message.reply_text("**Filter name kam se kam 2 akshar ka hona chahiye.**")
-
+    # Check Message Type
+    if rep.text:
         _type = "text"
-        file_id = None
-        data = None
+        content = rep.text
+    elif rep.sticker:
+        _type = "sticker"
+        file_id = rep.sticker.file_id
+    elif rep.photo:
+        _type = "photo"
+        file_id = rep.photo.file_id
+        content = rep.caption
+    elif rep.video:
+        _type = "video"
+        file_id = rep.video.file_id
+        content = rep.caption
+    elif rep.animation:
+        _type = "animation"
+        file_id = rep.animation.file_id
+        content = rep.caption
+    elif rep.voice:
+        _type = "voice"
+        file_id = rep.voice.file_id
+        content = rep.caption
+    
+    # Save to dictionary
+    filter_data = {
+        "type": _type,
+        "file_id": file_id,
+        "text": content
+    }
 
-        # Check for media types
-        if replied_message.text:
-            _type = "text"
-            data = replied_message.text
-        elif replied_message.sticker:
-            _type = "sticker"
-            file_id = replied_message.sticker.file_id
-        elif replied_message.animation:
-            _type = "animation"
-            file_id = replied_message.animation.file_id
-            data = replied_message.caption
-        elif replied_message.photo:
-            _type = "photo"
-            file_id = replied_message.photo.file_id
-            data = replied_message.caption
-        elif replied_message.document:
-            _type = "document"
-            file_id = replied_message.document.file_id
-            data = replied_message.caption
-        elif replied_message.video:
-            _type = "video"
-            file_id = replied_message.video.file_id
-            data = replied_message.caption
-        elif replied_message.video_note:
-            _type = "video_note"
-            file_id = replied_message.video_note.file_id
-        elif replied_message.audio:
-            _type = "audio"
-            file_id = replied_message.audio.file_id
-            data = replied_message.caption
-        elif replied_message.voice:
-            _type = "voice"
-            file_id = replied_message.voice.file_id
-            data = replied_message.caption
-
-        # Agar button wagera hain
-        if data:
-            data = await check_format(ikb, data)
-
-        _filter = {
-            "type": _type,
-            "data": data,
-            "file_id": file_id,
-        }
-
-        await save_filter(message.chat.id, name, _filter)
-        return await message.reply_text(f"**Saved filter `{name}` in {message.chat.title}.**")
-
-    except Exception as e:
-        await message.reply_text(f"**Error:** `{e}`")
+    await save_filter(message.chat.id, name, filter_data)
+    await message.reply_text(f"**Saved `{name}` as {_type} filter!**")
 
 
-# --- FILTER TRIGGER (SIRF GROUPS MEIN) ---
-@app.on_message((filters.text | filters.caption) & ~filters.private & ~filters.forwarded & ~BANNED_USERS, group=1)
-async def filters_re(_, message: Message):
+# --- 2. TRIGGER FILTERS ---
+@app.on_message((filters.text | filters.caption) & ~filters.private & ~BANNED_USERS, group=4)
+async def filters_trigger(_, message: Message):
+    if not message.text and not message.caption:
+        return
+
     text = message.text or message.caption
-    if not text:
-        return
-
     chat_id = message.chat.id
-    list_of_filters = await get_filters_names(chat_id)
-    if not list_of_filters:
+    
+    # Get all filter names for this chat
+    all_names = await get_filters_names(chat_id)
+    if not all_names:
         return
 
-    for word in list_of_filters:
+    for word in all_names:
+        # Regex to match exact word (supports kiru_op)
         pattern = r"( |^|[^\w])" + re.escape(word) + r"( |$|[^\w])"
-        if re.search(pattern, text.lower(), flags=re.IGNORECASE):
-            _filter = await get_filter(chat_id, word)
-            if not _filter:
+        if re.search(pattern, text.lower()):
+            data = await get_filter(chat_id, word)
+            if not data:
                 continue
 
-            data_type = _filter["type"]
-            data = _filter["data"]
-            file_id = _filter.get("file_id")
+            _type = data["type"]
+            file_id = data.get("file_id")
+            msg_text = data.get("text")
             keyb = None
 
-            # Placeholders
-            if data:
-                if "{NAME}" in data: data = data.replace("{NAME}", message.from_user.mention if message.from_user else "User")
-                if "{ID}" in data: data = data.replace("{ID}", str(message.from_user.id if message.from_user else "0"))
-                if "{GROUPNAME}" in data: data = data.replace("{GROUPNAME}", message.chat.title)
+            # Handle Placeholders in text/caption
+            if msg_text:
+                if "{NAME}" in msg_text:
+                    msg_text = msg_text.replace("{NAME}", message.from_user.mention if message.from_user else "User")
+                if "{ID}" in msg_text:
+                    msg_text = msg_text.replace("{ID}", str(message.from_user.id))
                 
-                # Buttons handling
-                if "[" in data and "]" in data:
-                    keyboard = extract_text_and_keyb(ikb, data)
-                    if keyboard:
-                        data, keyb = keyboard
+                # Extract Buttons
+                if "[" in msg_text and "]" in msg_text:
+                    try:
+                        extracted = extract_text_and_keyb(ikb, msg_text)
+                        if extracted:
+                            msg_text, keyb = extracted
+                    except:
+                        pass
 
-            # Reply logic for all media
+            # SEND RESPONSE
             target = message.reply_to_message or message
-            
             try:
-                if data_type == "text":
-                    await target.reply_text(data, reply_markup=keyb, disable_web_page_preview=True)
-                elif data_type == "sticker":
-                    await target.reply_sticker(file_id, reply_markup=keyb)
-                elif data_type == "animation":
-                    await target.reply_animation(file_id, caption=data, reply_markup=keyb)
-                elif data_type == "photo":
-                    await target.reply_photo(file_id, caption=data, reply_markup=keyb)
-                elif data_type == "video":
-                    await target.reply_video(file_id, caption=data, reply_markup=keyb)
-                elif data_type == "document":
-                    await target.reply_document(file_id, caption=data, reply_markup=keyb)
-                elif data_type == "audio":
-                    await target.reply_audio(file_id, caption=data, reply_markup=keyb)
-                elif data_type == "voice":
-                    await target.reply_voice(file_id, caption=data, reply_markup=keyb)
-                elif data_type == "video_note":
-                    await target.reply_video_note(file_id, reply_markup=keyb)
-                else:
-                    await target.reply_cached_media(file_id, caption=data, reply_markup=keyb)
-            except Exception:
-                pass
+                if _type == "text":
+                    await target.reply_text(msg_text, reply_markup=keyb, disable_web_page_preview=True)
+                elif _type == "sticker":
+                    await target.reply_sticker(file_id)
+                elif _type == "photo":
+                    await target.reply_photo(file_id, caption=msg_text, reply_markup=keyb)
+                elif _type == "video":
+                    await target.reply_video(file_id, caption=msg_text, reply_markup=keyb)
+                elif _type == "animation":
+                    await target.reply_animation(file_id, caption=msg_text, reply_markup=keyb)
+                elif _type == "voice":
+                    await target.reply_voice(file_id, caption=msg_text, reply_markup=keyb)
+            except Exception as e:
+                print(f"Filter Error: {e}")
             return
 
 
-# --- STOP FILTER ---
-@app.on_message(filters.command("stop") & ~filters.private & ~BANNED_USERS)
-@adminsOnly("can_change_info")
-async def stop_filter_cmd(_, message):
-    if len(message.command) < 2:
-        return await message.reply_text("**Usage:** `/stop [NAME]`")
-    
-    name = message.text.split(None, 1)[1].lower().strip()
-    all_filters = await get_filters_names(message.chat.id)
-    
-    if name in all_filters:
-        if delete_filter:
-            await delete_filter(message.chat.id, name)
-            await message.reply_text(f"**Stopped filter `{name}`.**")
-        else:
-            await message.reply_text("**Error:** Database delete function not found.")
-    else:
-        await message.reply_text("**Filter nahi mila.**")
-
-
-# --- LIST FILTERS ---
+# --- 3. OTHER COMMANDS ---
 @app.on_message(filters.command("filters") & ~filters.private & ~BANNED_USERS)
-@capture_err
-async def get_filterss(_, message):
-    _filters = await get_filters_names(message.chat.id)
-    if not _filters:
-        return await message.reply_text("**Is group mein koi filters nahi hain.**")
-    
-    _filters.sort()
-    msg = f"**{message.chat.title} ke filters:**\n"
-    for _filter in _filters:
-        msg += f"**-** `{_filter}`\n"
+async def list_filters(_, message):
+    names = await get_filters_names(message.chat.id)
+    if not names:
+        return await message.reply_text("No filters in this chat.")
+    msg = f"**Filters in {message.chat.title}:**\n" + "\n".join([f"- `{n}`" for n in sorted(names)])
     await message.reply_text(msg)
 
+@app.on_message(filters.command("stop") & ~filters.private & ~BANNED_USERS)
+@adminsOnly("can_change_info")
+async def stop_filter(_, message):
+    if len(message.command) < 2:
+        return await message.reply_text("Usage: `/stop [NAME]`")
+    name = message.text.split(None, 1)[1].strip().lower()
+    await delete_filter(message.chat.id, name)
+    await message.reply_text(f"**Stopped filter `{name}`.**")
 
-# --- STOP ALL FILTERS ---
 @app.on_message(filters.command("stopall") & ~filters.private & ~BANNED_USERS)
 @adminsOnly("can_change_info")
-async def stop_all(_, message):
-    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("Haan", callback_data="stop_yes"), InlineKeyboardButton("Nahi", callback_data="stop_no")]])
-    await message.reply_text("**Kya aap sach mein saare filters delete karna chahte hain?**", reply_markup=keyboard)
-
-@app.on_callback_query(filters.regex("stop_(.*)"))
-async def stop_all_cb(_, cb):
-    if cb.data == "stop_yes":
-        await deleteall_filters(cb.message.chat.id)
-        await cb.message.edit("**Saare filters delete kar diye gaye hain!**")
-    else:
-        await cb.message.delete()
+async def stop_all_filters(_, message):
+    await deleteall_filters(message.chat.id)
+    await message.reply_text("**All filters deleted.**")
