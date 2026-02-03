@@ -15,7 +15,7 @@ from pyrogram.enums import ChatType
 from VIPMUSIC import app
 
 # --- CONFIGURATION (MongoDB Setup) ---
-MONGO_URL = "mongodb+srv://your_mongodb_url" # <--- Apni MongoDB URL yahan dalen
+MONGO_URL = "mongodb+srv://vishalpandeynkp:Bal6Y6FZeQeoAoqV@cluster0.dzgwt.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0" # <--- Apni MongoDB URL yahan dalen
 db_client = AsyncIOMotorClient(MONGO_URL)
 db = db_client["CouplesDB"]
 history_col = db["couple_history"] 
