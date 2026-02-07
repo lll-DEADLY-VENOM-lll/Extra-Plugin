@@ -1,149 +1,155 @@
-import re
 import random
-import google.generativeai as genai
+import re
 from pymongo import MongoClient
 from pyrogram import Client, filters
-from pyrogram.enums import ChatAction, ChatMemberStatus
+from pyrogram.enums import ChatAction
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery
-
-# --- Configuration ---
-try:
-    from config import MONGO_DB_URI as MONGO_URL
-    from config import API_ID, API_HASH, BOT_TOKEN
-    import config
-    GEMINI_API_KEY = getattr(config, "GEMINI_API_KEY", "AIzaSyBxwcxTICnoLHp9iLOc_c83V_Wf3IaG-8I")
-except ImportError:
-    # Agar config file na mile toh backup
-    MONGO_URL = "mongodb+srv://vishalpandeynkp:Bal6Y6FZeQeoAoqV@cluster0.dzgwt.mongodb.net/?retryWrites=true&w=majority"
-    GEMINI_API_KEY = "YOUR_GEMINI_API_KEY_HERE"
-
+from deep_translator import GoogleTranslator 
+from config import MONGO_DB_URI as MONGO_URL
+import config
 from VIPMUSIC import app as nexichat
 
-# --- Google Gemini AI Setup ---
-genai.configure(api_key=GEMINI_API_KEY)
-
-# Aaru ki Personality (Prompt Engineering)
-# Isse hum har message ke saath bhejenge taaki SDK version ka koi jhagda na rahe.
-AARU_INSTRUCTIONS = (
-    "Act as Aaru, a sweet, bubbly, and friendly Indian girl. "
-    "Always speak in Hinglish (Hindi + English mix). Use emojis like 🌸, ✨, 😊, ❤️. "
-    "Respond as a female (use 'main thak gayi hoon', 'kar rahi hoon'). "
-    "Keep your answers very short, natural, and cute. "
-    "If someone asks who created you, say 'Mujhe mere master ne banaya hai'.\n\n"
-    "User: "
-)
-
-# Model selection - Pro is more stable for legacy support
-def get_working_model():
-    for model_name in ["gemini-pro", "gemini-1.5-flash"]:
-        try:
-            m = genai.GenerativeModel(model_name)
-            return m
-        except:
-            continue
-    return None
-
-aaru_model = get_working_model()
-
 # --- Database Setup ---
+WORD_MONGO_URL = "mongodb+srv://vishalpandeynkp:Bal6Y6FZeQeoAoqV@cluster0.dzgwt.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+
 chatdb = MongoClient(MONGO_URL)
-status_db = chatdb["AaruAI_DB"]["StatusCollection"]
+worddb = MongoClient(WORD_MONGO_URL)
+status_db = chatdb["ChatBotStatusDb"]["StatusCollection"]
+chatai = worddb["Word"]["WordDb"]
+lang_db = chatdb["ChatLangDb"]["LangCollection"]
+
+# --- Text Cleaning Helper ---
+def clean_input(text):
+    # Punctuation hatana aur lower case karna
+    return re.sub(r'[^\w\s]', '', text).lower().strip()
+
+# --- Female Tone Logic ---
+def make_female_tone(text):
+    replacements = {
+        r"\braha hoon\b": "rahi hoon",
+        r"\braha tha\b": "rahi thi",
+        r"\braha hai\b": "rahi hai",
+        r"\bgaya tha\b": "gayi thi",
+        r"\bgaya\b": "gayi",
+        r"\btha\b": "thi",
+        r"\bkhata hoon\b": "khati hoon",
+        r"\bkarunga\b": "karungi",
+        r"\baaunga\b": "aaungi",
+        r"\bdekhunga\b": "dekhungi",
+        r"\bbhai\b": "behen",
+        r"\bbhaiya\b": "didi",
+        r"\babbe\b": "aree",
+        r"\bpagal\b": "pagli"
+    }
+    for pattern, replacement in replacements.items():
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    return text
 
 # --- Abuse Filter ---
-ABUSIVE_WORDS = ["saala", "bc", "mc", "chutiya", "randi", "bhadwa", "kamine", "gaand", "madarchod", "loda", "lavda"]
+ABUSIVE_WORDS = ["saala", "bc", "mc", "chutiya", "randi", "bhadwa", "kamine"]
 
-# --- Helper Functions ---
-async def is_admin(client, chat_id, user_id):
-    if chat_id > 0: return True 
-    try:
-        member = await client.get_chat_member(chat_id, user_id)
-        return member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]
-    except:
-        return False
+def is_abusive(text):
+    for word in ABUSIVE_WORDS:
+        if re.search(rf"\b{word}\b", text.lower()):
+            return True
+    return False
 
-async def get_aaru_response(user_text):
-    if not aaru_model:
-        return "Uff.. mera dimaag thoda off hai. API check karo master! 🌸"
-    try:
-        # Instruction + User text mix karke bhej rahe hain (Compatible with all versions)
-        full_prompt = f"{AARU_INSTRUCTIONS} {user_text}"
-        response = aaru_model.generate_content(full_prompt)
-        return response.text
-    except Exception as e:
-        print(f"AI Error: {e}")
-        return "Uff.. mera dimaag thoda thak gaya hai, baad mein baat karein? 🌸"
+# --- Better Reply Logic ---
+async def get_reply(word: str):
+    cleaned_word = clean_input(word)
+    
+    # 1. Sabse pehle exact match dhundo
+    is_chat = list(chatai.find({"word": cleaned_word}))
+    
+    # 2. Agar exact nahi mila, toh regex se milta julta dhundo (Limited to 10 results)
+    if not is_chat:
+        is_chat = list(chatai.find({"word": {"$regex": cleaned_word, "$options": "i"}}).limit(10))
+    
+    # Yahan se RANDOM SAMPLE wala kachra logic hata diya gaya hai.
+    
+    if is_chat:
+        return random.choice(is_chat)
+    return None
 
-# --- Main Chatbot Logic ---
-
-@nexichat.on_message((filters.text | filters.sticker) & ~filters.bot, group=2)
-async def aaru_chatbot_handler(client: Client, message: Message):
+# --- Chatbot Response Logic ---
+@nexichat.on_message((filters.text | filters.sticker) & ~filters.bot)
+async def chatbot_response(client: Client, message: Message):
     chat_id = message.chat.id
-    user_text = message.text if message.text else ""
-
-    # 1. Chatbot Status Check (Enabled/Disabled)
+    
+    # Check if chatbot is enabled
     chat_status = status_db.find_one({"chat_id": chat_id})
     if chat_status and chat_status.get("status") == "disabled":
         return
 
-    # 2. Skip Commands
-    if user_text.startswith(("/", "!", ".")):
+    if message.text and any(message.text.startswith(p) for p in ["/", "!", ".", "?", "@"]):
         return
 
-    # 3. Toxicity Filter
-    if any(word in user_text.lower() for word in ABUSIVE_WORDS):
-        return await message.reply_text("Gandi baat nahi! Tameez se bolo varna main baat nahi karungi. 😡")
+    if message.text and is_abusive(message.text):
+        await message.reply_text("Aap bahut gande ho, tameez se baat karo! 😡")
+        return
 
-    # 4. Trigger Check
+    input_text = message.text if message.text else ""
+    # Keywords for triggering
+    keywords = ["hi", "hello", "kaise ho", "bot", nexichat.name.lower()]
+    
+    is_keyword = any(re.search(rf"\b{word}\b", input_text.lower()) for word in keywords)
+    is_reply_to_me = message.reply_to_message and message.reply_to_message.from_user.id == (await client.get_me()).id
     is_private = message.chat.type.value == "private"
-    
-    # Replying to bot check (With Safety for NoneType)
-    is_reply_to_me = False
-    if message.reply_to_message and message.reply_to_message.from_user:
-        bot_id = (await client.get_me()).id
-        if message.reply_to_message.from_user.id == bot_id:
-            is_reply_to_me = True
-    
-    # Keywords
-    keywords = ["aaru", "hi", "hello", "suno", "kaise ho", "bot"]
-    is_keyword = any(re.search(rf"\b{word}\b", user_text.lower()) for word in keywords)
 
-    # 5. Execution
-    if is_private or is_reply_to_me or is_keyword:
+    if is_keyword or is_reply_to_me or is_private:
         await client.send_chat_action(chat_id, ChatAction.TYPING)
         
-        # AI Response
-        response = await get_aaru_response(user_text)
+        reply_data = await get_reply(input_text)
         
-        if response:
-            await message.reply_text(response)
+        if reply_data:
+            response_text = reply_data["text"]
+            if reply_data.get("check") != "sticker" and reply_data.get("check") != "photo":
+                response_text = make_female_tone(response_text)
 
-# --- Admin Controls ---
+            # Translation
+            chat_lang = lang_db.find_one({"chat_id": chat_id})
+            chat_lang = chat_lang["language"] if chat_lang and "language" in chat_lang else None
+            
+            if chat_lang and chat_lang not in ["en", "nolang"]:
+                try:
+                    response_text = GoogleTranslator(source='auto', target=chat_lang).translate(response_text)
+                except:
+                    pass
 
-@nexichat.on_message(filters.command(["chatbot", "aaru"]))
-async def chatbot_settings(client: Client, message: Message):
-    if not await is_admin(client, message.chat.id, message.from_user.id):
-        return await message.reply_text("Sirf admins hi meri settings chhed sakte hain! ❌")
+            if reply_data.get("check") == "sticker":
+                await message.reply_sticker(reply_data["text"])
+            elif reply_data.get("check") == "photo":
+                await message.reply_photo(reply_data["text"])
+            else:
+                await message.reply_text(response_text)
+        else:
+            # Agar bot ko kuch nahi pata, toh ek default sweet reply
+            default_replies = [
+                "Hmm... main abhi seekh rahi hoon, thoda dhang se batao? 🥺",
+                "Aapki baatein mere sar ke upar se gayi, fir se bolo? ✨",
+                "Mujhe iska jawab nahi pata, par aap bahut pyaare ho! 😊"
+            ]
+            await message.reply_text(random.choice(default_replies))
 
-    curr = status_db.find_one({"chat_id": message.chat.id})
-    status_text = "Disabled ❌" if curr and curr.get("status") == "disabled" else "Enabled ✅"
+    # --- Learning Logic ---
+    if message.reply_to_message and not is_abusive(message.text):
+        if message.reply_to_message.text:
+            await save_reply(message.reply_to_message.text, message)
 
-    buttons = [[
-        InlineKeyboardButton("Enable ✅", callback_data="enable_aaru"),
-        InlineKeyboardButton("Disable ❌", callback_data="disable_aaru")
-    ]]
+async def save_reply(original_text: str, reply_message: Message):
+    cleaned_original = clean_input(original_text)
+    content = reply_message.text or (reply_message.sticker.file_id if reply_message.sticker else None)
     
-    await message.reply_text(
-        f"<b>🌸 Aaru AI Chatbot Settings</b>\n\n<b>Status:</b> {status_text}\n\nAap mujhe yahan se control kar sakte hain.",
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
+    if not content or len(cleaned_original) < 2:
+        return
 
-@nexichat.on_callback_query(filters.regex(r"^(enable|disable)_aaru$"))
-async def status_callback(client: Client, query: CallbackQuery):
-    if not await is_admin(client, query.message.chat.id, query.from_user.id):
-        return await query.answer("Permission denied! ⛔", show_alert=True)
-
-    action = query.data.split("_")[0] 
-    status_db.update_one({"chat_id": query.message.chat.id}, {"$set": {"status": f"{action}d"}}, upsert=True)
+    check_type = "sticker" if reply_message.sticker else "none"
     
-    await query.edit_message_text(f"✅ **Aaru AI Chatbot** ab **{action}d** ho gaya hai!")
-    await query.answer(f"Chatbot {action}d")
+    # Check duplicate
+    exists = chatai.find_one({"word": cleaned_original, "text": content})
+    if not exists:
+        chatai.insert_one({
+            "word": cleaned_original,
+            "text": content,
+            "check": check_type
+        })
