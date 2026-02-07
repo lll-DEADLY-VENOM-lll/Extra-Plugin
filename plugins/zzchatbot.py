@@ -7,52 +7,52 @@ from pyrogram.enums import ChatAction, ChatMemberStatus
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message, CallbackQuery
 
 # --- Configuration ---
-from config import MONGO_DB_URI as MONGO_URL
-from config import API_ID, API_HASH, BOT_TOKEN
-import config
-
-# Gemini API Key
-GEMINI_API_KEY = getattr(config, "GEMINI_API_KEY", "AIzaSyBxwcxTICnoLHp9iLOc_c83V_Wf3IaG-8I")
+try:
+    from config import MONGO_DB_URI as MONGO_URL
+    from config import API_ID, API_HASH, BOT_TOKEN
+    import config
+    GEMINI_API_KEY = getattr(config, "GEMINI_API_KEY", "AIzaSyBxwcxTICnoLHp9iLOc_c83V_Wf3IaG-8I")
+except ImportError:
+    # Agar config file na mile toh backup
+    MONGO_URL = "mongodb+srv://vishalpandeynkp:Bal6Y6FZeQeoAoqV@cluster0.dzgwt.mongodb.net/?retryWrites=true&w=majority"
+    GEMINI_API_KEY = "YOUR_GEMINI_API_KEY_HERE"
 
 from VIPMUSIC import app as nexichat
 
-# --- AI Configuration ---
+# --- Google Gemini AI Setup ---
 genai.configure(api_key=GEMINI_API_KEY)
 
-# Aaru Personality
-SYSTEM_INSTRUCTION = (
-    "Your name is Aaru. You are a sweet, bubbly Indian girl. Speak in Hinglish (Hindi + English). "
-    "Use emojis like 🌸, ✨, 😊, ❤️. Respond as a female (e.g., 'main kar rahi hoon'). "
-    "Keep answers short and human-like. Don't mention you are an AI."
+# Aaru ki Personality (Prompt Engineering)
+# Isse hum har message ke saath bhejenge taaki SDK version ka koi jhagda na rahe.
+AARU_INSTRUCTIONS = (
+    "Act as Aaru, a sweet, bubbly, and friendly Indian girl. "
+    "Always speak in Hinglish (Hindi + English mix). Use emojis like 🌸, ✨, 😊, ❤️. "
+    "Respond as a female (use 'main thak gayi hoon', 'kar rahi hoon'). "
+    "Keep your answers very short, natural, and cute. "
+    "If someone asks who created you, say 'Mujhe mere master ne banaya hai'.\n\n"
+    "User: "
 )
 
-# --- MongoDB Setup ---
+# Model selection - Pro is more stable for legacy support
+def get_working_model():
+    for model_name in ["gemini-pro", "gemini-1.5-flash"]:
+        try:
+            m = genai.GenerativeModel(model_name)
+            return m
+        except:
+            continue
+    return None
+
+aaru_model = get_working_model()
+
+# --- Database Setup ---
 chatdb = MongoClient(MONGO_URL)
 status_db = chatdb["AaruAI_DB"]["StatusCollection"]
 
 # --- Abuse Filter ---
 ABUSIVE_WORDS = ["saala", "bc", "mc", "chutiya", "randi", "bhadwa", "kamine", "gaand", "madarchod", "loda", "lavda"]
 
-# --- Smart AI Logic (Fixes 404 Error) ---
-async def get_aaru_reply(user_text):
-    # Alag-alag models try karega agar ek fail ho jaye
-    models_to_try = ["gemini-1.5-flash", "gemini-pro"]
-    
-    for model_name in models_to_try:
-        try:
-            model = genai.GenerativeModel(
-                model_name=model_name,
-                system_instruction=SYSTEM_INSTRUCTION
-            )
-            response = model.generate_content(user_text)
-            return response.text
-        except Exception as e:
-            print(f"Model {model_name} error: {e}")
-            continue # Agla model try karega
-            
-    return "Uff.. mera dimaag thoda thak gaya hai, baad mein baat karein? 🌸"
-
-# --- Admin Check Helper ---
+# --- Helper Functions ---
 async def is_admin(client, chat_id, user_id):
     if chat_id > 0: return True 
     try:
@@ -61,74 +61,89 @@ async def is_admin(client, chat_id, user_id):
     except:
         return False
 
-# --- Main Chatbot Logic (Fixes AttributeError) ---
+async def get_aaru_response(user_text):
+    if not aaru_model:
+        return "Uff.. mera dimaag thoda off hai. API check karo master! 🌸"
+    try:
+        # Instruction + User text mix karke bhej rahe hain (Compatible with all versions)
+        full_prompt = f"{AARU_INSTRUCTIONS} {user_text}"
+        response = aaru_model.generate_content(full_prompt)
+        return response.text
+    except Exception as e:
+        print(f"AI Error: {e}")
+        return "Uff.. mera dimaag thoda thak gaya hai, baad mein baat karein? 🌸"
+
+# --- Main Chatbot Logic ---
 
 @nexichat.on_message((filters.text | filters.sticker) & ~filters.bot, group=2)
-async def aaru_ai_handler(client: Client, message: Message):
+async def aaru_chatbot_handler(client: Client, message: Message):
     chat_id = message.chat.id
     user_text = message.text if message.text else ""
 
-    # 1. Skip Commands
-    if user_text.startswith(("/", "!", ".")):
-        return
-
-    # 2. Status Check
+    # 1. Chatbot Status Check (Enabled/Disabled)
     chat_status = status_db.find_one({"chat_id": chat_id})
     if chat_status and chat_status.get("status") == "disabled":
         return
 
-    # 3. Abuse Filter
-    if any(word in user_text.lower() for word in ABUSIVE_WORDS):
-        return await message.reply_text("Gandi baat nahi! Tameez se bolo. 😡")
+    # 2. Skip Commands
+    if user_text.startswith(("/", "!", ".")):
+        return
 
-    # 4. Trigger Check (Fixed AttributeError here)
+    # 3. Toxicity Filter
+    if any(word in user_text.lower() for word in ABUSIVE_WORDS):
+        return await message.reply_text("Gandi baat nahi! Tameez se bolo varna main baat nahi karungi. 😡")
+
+    # 4. Trigger Check
     is_private = message.chat.type.value == "private"
     
-    # Check if replied to bot
+    # Replying to bot check (With Safety for NoneType)
     is_reply_to_me = False
-    if message.reply_to_message:
-        # Check if reply_to_message has a user (avoids NoneType error)
-        if message.reply_to_message.from_user:
-            bot_me = await client.get_me()
-            if message.reply_to_message.from_user.id == bot_me.id:
-                is_reply_to_me = True
+    if message.reply_to_message and message.reply_to_message.from_user:
+        bot_id = (await client.get_me()).id
+        if message.reply_to_message.from_user.id == bot_id:
+            is_reply_to_me = True
     
     # Keywords
-    keywords = ["aaru", "hi", "hello", "suno", "kaise ho"]
+    keywords = ["aaru", "hi", "hello", "suno", "kaise ho", "bot"]
     is_keyword = any(re.search(rf"\b{word}\b", user_text.lower()) for word in keywords)
 
-    # Execute
+    # 5. Execution
     if is_private or is_reply_to_me or is_keyword:
         await client.send_chat_action(chat_id, ChatAction.TYPING)
-        reply = await get_aaru_reply(user_text)
-        if reply:
-            await message.reply_text(reply)
+        
+        # AI Response
+        response = await get_aaru_response(user_text)
+        
+        if response:
+            await message.reply_text(response)
 
-# --- Settings Command ---
+# --- Admin Controls ---
 
 @nexichat.on_message(filters.command(["chatbot", "aaru"]))
 async def chatbot_settings(client: Client, message: Message):
     if not await is_admin(client, message.chat.id, message.from_user.id):
-        return await message.reply_text("Sirf admins hi ye kar sakte hain! ❌")
+        return await message.reply_text("Sirf admins hi meri settings chhed sakte hain! ❌")
 
     curr = status_db.find_one({"chat_id": message.chat.id})
-    status = "Disabled ❌" if curr and curr.get("status") == "disabled" else "Enabled ✅"
+    status_text = "Disabled ❌" if curr and curr.get("status") == "disabled" else "Enabled ✅"
 
-    keyboard = InlineKeyboardMarkup([[
+    buttons = [[
         InlineKeyboardButton("Enable ✅", callback_data="enable_aaru"),
         InlineKeyboardButton("Disable ❌", callback_data="disable_aaru")
-    ]])
-
+    ]]
+    
     await message.reply_text(
-        f"<b>🌸 Aaru AI Chatbot Settings</b>\n<b>Status:</b> {status}",
-        reply_markup=keyboard
+        f"<b>🌸 Aaru AI Chatbot Settings</b>\n\n<b>Status:</b> {status_text}\n\nAap mujhe yahan se control kar sakte hain.",
+        reply_markup=InlineKeyboardMarkup(buttons)
     )
 
 @nexichat.on_callback_query(filters.regex(r"^(enable|disable)_aaru$"))
-async def update_status(client: Client, query: CallbackQuery):
+async def status_callback(client: Client, query: CallbackQuery):
     if not await is_admin(client, query.message.chat.id, query.from_user.id):
-        return await query.answer("Access Denied! ⛔", show_alert=True)
+        return await query.answer("Permission denied! ⛔", show_alert=True)
 
-    action = query.data.split("_")[0]
+    action = query.data.split("_")[0] 
     status_db.update_one({"chat_id": query.message.chat.id}, {"$set": {"status": f"{action}d"}}, upsert=True)
-    await query.edit_message_text(f"✅ **Aaru AI** ab is chat mein **{action}d** hai!")
+    
+    await query.edit_message_text(f"✅ **Aaru AI Chatbot** ab **{action}d** ho gaya hai!")
+    await query.answer(f"Chatbot {action}d")
