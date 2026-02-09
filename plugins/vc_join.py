@@ -8,10 +8,9 @@ from VIPMUSIC.core.call import VIP
 # MongoDB collection
 db = mongodb.vc_monitoring
 
-# MongoDB check function (Simplified & Fixed)
+# MongoDB check function
 async def is_monitoring_enabled(chat_id):
     try:
-        # VIP Music mein mongodb usually motor-asyncio hota hai
         status = await db.find_one({"chat_id": chat_id})
         if status and status.get("status") == "on":
             return True
@@ -43,14 +42,27 @@ async def vc_participants_handler(client, update):
 
     if user_id:
         try:
-            mention = f"[{user_id}](tg://user?id={user_id})"
+            # --- Yahan se changes hain: User info fetch karna ---
+            user = await app.get_users(user_id)
+            full_name = f"{user.first_name} {user.last_name}" if user.last_name else user.first_name
+            username = f"@{user.username}" if user.username else "No Username"
+            mention = user.mention(full_name) # Isse naam par click karke profile khulegi
+
             # Message send logic
             await app.send_message(
                 chat_id, 
-                f"{mention} {action_text}\n**User ID:** `{user_id}`"
+                f"{mention} {action_text}\n"
+                f"**👤 Name:** {full_name}\n"
+                f"**🔗 Username:** {username}\n"
+                f"**🆔 User ID:** `{user_id}`"
             )
         except Exception as e:
-            print(f"Failed to send message: {e}")
+            # Agar user details nahi mil pati (rare case) toh purana wala style use karega
+            print(f"Failed to fetch user or send message: {e}")
+            await app.send_message(
+                chat_id, 
+                f"Ek user ({user_id}) {action_text}"
+            )
 
 # Commands to turn ON/OFF
 @app.on_message(filters.command(["vclogon", "checkvcon"]) & filters.group)
