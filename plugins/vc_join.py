@@ -4,15 +4,15 @@ from pytgcalls.types import Update
 from pytgcalls.types.groups import JoinedGroupCallParticipant, LeftGroupCallParticipant
 from VIPMUSIC.core.mongo import mongodb 
 from VIPMUSIC import app
-from VIPMUSIC.core.call import VIP
+from VIPMUSIC.core.call import VIP # VIP is the Call object
 
 # Function to check if monitoring is enabled
 def is_monitoring_enabled(chat_id):
     status = mongodb.vc_monitoring.find_one({"chat_id": chat_id})
     return status and status["status"] == "on"
 
-# Event listener for VC updates
-@VIP.on_update()
+# FIX: VIP.app.on_update() use karein kyunki pytgcalls instance VIP.app ke andar hai
+@VIP.app.on_update()
 async def vc_update_handler(client, update: Update):
     if not isinstance(update, (JoinedGroupCallParticipant, LeftGroupCallParticipant)):
         return
