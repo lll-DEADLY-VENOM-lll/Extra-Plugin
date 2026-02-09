@@ -4,16 +4,17 @@ from pytgcalls.types import Update
 from pytgcalls.types.groups import JoinedGroupCallParticipant, LeftGroupCallParticipant
 from VIPMUSIC.core.mongo import mongodb 
 from VIPMUSIC import app
-from VIPMUSIC.core.call import VIP # VIP is the Call object
+from VIPMUSIC.core.call import VIP
 
 # Function to check if monitoring is enabled
 def is_monitoring_enabled(chat_id):
     status = mongodb.vc_monitoring.find_one({"chat_id": chat_id})
     return status and status["status"] == "on"
 
-# FIX: VIP.app.on_update() use karein kyunki pytgcalls instance VIP.app ke andar hai
-@VIP.app.on_update()
+# FIX: VIP.userbot.on_update() use karein
+@VIP.userbot.on_update()
 async def vc_update_handler(client, update: Update):
+    # Sirf join aur leave events ko handle karein
     if not isinstance(update, (JoinedGroupCallParticipant, LeftGroupCallParticipant)):
         return
     
@@ -27,7 +28,7 @@ async def vc_update_handler(client, update: Update):
         mention = f"[User](tg://user?id={user_id})"
         try:
             await app.send_message(chat_id, f"👤 {mention} ne VC join kiya.\n**User ID:** `{user_id}`")
-        except Exception:
+        except:
             pass
 
     # Jab koi leave kare
@@ -36,7 +37,7 @@ async def vc_update_handler(client, update: Update):
         mention = f"[User](tg://user?id={user_id})"
         try:
             await app.send_message(chat_id, f"🏃 {mention} ne VC leave kiya.\n**User ID:** `{user_id}`")
-        except Exception:
+        except:
             pass
 
 # Commands
@@ -48,7 +49,7 @@ async def start_vc_monitor(client: Client, message: Message):
         {"$set": {"status": "on"}},
         upsert=True
     )
-    await message.reply("✅ VC monitoring start kar di gayi hai.")
+    await message.reply("✅ VC monitoring start ho gayi hai. Assistant ab join/leave track karega.")
 
 @app.on_message(filters.command("checkvcoff") & filters.group)
 async def stop_vc_monitor(client: Client, message: Message):
@@ -57,4 +58,4 @@ async def stop_vc_monitor(client: Client, message: Message):
         {"chat_id": chat_id},
         {"$set": {"status": "off"}}
     )
-    await message.reply("❌ VC monitoring stop kar di gayi hai.")
+    await message.reply("❌ VC monitoring stop ho gayi hai.")
