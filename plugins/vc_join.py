@@ -12,7 +12,7 @@ def is_monitoring_enabled(chat_id):
     return status and status["status"] == "on"
 
 # FIX: VIP.userbot.on_update() use karein
-@VIP.userbot.on_update()
+@VIP.call.on_update()
 async def vc_update_handler(client, update: Update):
     # Sirf join aur leave events ko handle karein
     if not isinstance(update, (JoinedGroupCallParticipant, LeftGroupCallParticipant)):
