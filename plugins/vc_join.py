@@ -11,8 +11,8 @@ def is_monitoring_enabled(chat_id):
     status = mongodb.vc_monitoring.find_one({"chat_id": chat_id})
     return status and status["status"] == "on"
 
-# FIX: Yaha '@VIP.calls' use kiya gaya hai (S ke saath)
-@VIP.calls.on_update()
+# FIX: VIP.one use karein (Ye Assistant 1 ka pytgcalls instance hai)
+@VIP.one.on_update()
 async def vc_update_handler(client, update: Update):
     if not isinstance(update, (JoinedGroupCallParticipant, LeftGroupCallParticipant)):
         return
@@ -48,7 +48,7 @@ async def start_vc_monitor(client: Client, message: Message):
         {"$set": {"status": "on"}},
         upsert=True
     )
-    await message.reply("✅ VC monitoring start ho gayi hai.")
+    await message.reply("✅ VC monitoring start ho gayi hai (Assistant 1 track karega).")
 
 @app.on_message(filters.command("checkvcoff") & filters.group)
 async def stop_vc_monitor(client: Client, message: Message):
