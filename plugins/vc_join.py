@@ -4,23 +4,26 @@ from pytgcalls.types import JoinedGroupCallParticipant, LeftGroupCallParticipant
 from VIPMUSIC.core.mongo import mongodb 
 from VIPMUSIC import app
 from VIPMUSIC.core.call import VIP
-import asyncio
 
 # MongoDB collection
 db = mongodb.vc_monitoring
 
-# MongoDB check function (Safe handling)
+# MongoDB check function (Safely handled)
 async def is_monitoring_enabled(chat_id):
+    if not chat_id:
+        return False
     try:
         status = await db.find_one({"chat_id": chat_id})
         return status is not None and status.get("status") == "on"
-    except Exception:
+    except:
         return False
 
-# VC Participants Handler
+# VC Participants Handler (Join/Leave track karne ke liye)
 @VIP.one.on_participants_change()
 async def vc_participants_handler(client, update):
+    # Fix: Safely get chat_id from update
     chat_id = getattr(update, "chat_id", None)
+    
     if not chat_id or not await is_monitoring_enabled(chat_id):
         return
 
@@ -36,42 +39,45 @@ async def vc_participants_handler(client, update):
 
     if user_id:
         try:
-            # User details fetch karna (Username ke liye)
+            # Username fetch karne ke liye user details nikalna
             user = await app.get_users(user_id)
             if user:
-                name = user.first_name if user.first_name else "User"
+                name = user.first_name or "User"
                 username = f"@{user.username}" if user.username else "N/A"
                 mention = f"[{name}](tg://user?id={user_id})"
                 
-                msg_text = (
+                final_text = (
                     f"{mention} {action_text}\n"
                     f"**👤 Name:** {name}\n"
                     f"**🔗 Username:** {username}\n"
                     f"**🆔 User ID:** `{user_id}`"
                 )
             else:
-                msg_text = f"User ID: `{user_id}` {action_text}"
+                final_text = f"User ID `{user_id}` {action_text}"
 
-            await app.send_message(chat_id, msg_text)
+            await app.send_message(chat_id, final_text)
+            
         except Exception as e:
-            # Agar user details na milein toh sirf ID bhej do
-            print(f"User Fetch Error: {e}")
+            # Agar bot user details fetch na kar paye toh sirf ID bhej dega
+            print(f"Error fetching user in VC: {e}")
             try:
-                await app.send_message(chat_id, f"Ek user (`{user_id}`) {action_text}")
+                await app.send_message(chat_id, f"User ID `{user_id}` {action_text}")
             except:
                 pass
 
-# --- Commands with Safety Checks (Flood Detector Fix) ---
+# --- COMMANDS SECTION WITH FLOOD & NONETYPE FIX ---
 
 @app.on_message(filters.command(["vclogon", "checkvcon"]) & filters.group)
 async def start_vc_monitor(client: Client, message: Message):
-    # Fix: Check if chat and from_user exist to avoid NoneType error
+    # Fix 1: Check if message and chat exist
     if not message or not message.chat:
         return
     
-    # Optional: Check if the message is from a user (not a channel/anonymous)
-    user_id = message.from_user.id if message.from_user else "Anonymous"
-    
+    # Fix 2: Anonymous Admin handling (from_user is None)
+    if not message.from_user:
+        # Agar anonymous admin hai, toh hum sirf chat_id process karenge bina error ke
+        pass 
+
     chat_id = message.chat.id
     try:
         await db.update_one(
@@ -79,9 +85,9 @@ async def start_vc_monitor(client: Client, message: Message):
             {"$set": {"status": "on"}},
             upsert=True
         )
-        await message.reply_text(f"✅ **VC Monitoring ON**\nAb participants track honge.")
+        await message.reply_text(f"✅ **VC Monitoring ON**\nAb participants track kiye jayenge.")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error in vclogon: {e}")
 
 @app.on_message(filters.command(["vclogoff", "checkvcoff"]) & filters.group)
 async def stop_vc_monitor(client: Client, message: Message):
@@ -97,4 +103,4 @@ async def stop_vc_monitor(client: Client, message: Message):
         )
         await message.reply_text("❌ **VC Monitoring OFF.**")
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error in vclogoff: {e}")
