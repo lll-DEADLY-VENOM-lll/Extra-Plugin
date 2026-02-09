@@ -14,8 +14,8 @@ async def is_monitoring_enabled(chat_id):
         status = await db.find_one({"chat_id": chat_id})
         if status and status.get("status") == "on":
             return True
-    except Exception as e:
-        print(f"Error checking DB: {e}")
+    except Exception:
+        return False
     return False
 
 # VC Participants Handler
@@ -23,68 +23,75 @@ async def is_monitoring_enabled(chat_id):
 async def vc_participants_handler(client, update):
     chat_id = update.chat_id
     
-    # Check if monitoring is ON
     if not await is_monitoring_enabled(chat_id):
         return
 
     user_id = None
     action_text = ""
 
-    # User Join Check
     if isinstance(update, JoinedGroupCallParticipant):
         user_id = update.participant.user_id
         action_text = "ne VC join kiya. 👤"
-
-    # User Leave Check
     elif isinstance(update, LeftGroupCallParticipant):
         user_id = update.participant.user_id
         action_text = "ne VC leave kiya. 🏃"
 
     if user_id:
         try:
-            # --- Yahan se changes hain: User info fetch karna ---
+            # User details nikalne ke liye
             user = await app.get_users(user_id)
-            full_name = f"{user.first_name} {user.last_name}" if user.last_name else user.first_name
-            username = f"@{user.username}" if user.username else "No Username"
-            mention = user.mention(full_name) # Isse naam par click karke profile khulegi
+            
+            # Agar user mil gaya toh details set karein
+            if user:
+                first_name = user.first_name if user.first_name else "User"
+                username = f"@{user.username}" if user.username else "N/A"
+                mention = f"[{first_name}](tg://user?id={user_id})"
+                
+                text = (
+                    f"{mention} {action_text}\n"
+                    f"**👤 Name:** {first_name}\n"
+                    f"**🔗 Username:** {username}\n"
+                    f"**🆔 User ID:** `{user_id}`"
+                )
+            else:
+                text = f"Ek user (`{user_id}`) {action_text}"
 
-            # Message send logic
-            await app.send_message(
-                chat_id, 
-                f"{mention} {action_text}\n"
-                f"**👤 Name:** {full_name}\n"
-                f"**🔗 Username:** {username}\n"
-                f"**🆔 User ID:** `{user_id}`"
-            )
+            await app.send_message(chat_id, text)
+            
         except Exception as e:
-            # Agar user details nahi mil pati (rare case) toh purana wala style use karega
-            print(f"Failed to fetch user or send message: {e}")
-            await app.send_message(
-                chat_id, 
-                f"Ek user ({user_id}) {action_text}"
-            )
+            # Agar koi error aaye (jaise flood limit ya user not found)
+            print(f"Error in VC handler: {e}")
+            try:
+                await app.send_message(chat_id, f"Ek user (`{user_id}`) {action_text}")
+            except:
+                pass
 
-# Commands to turn ON/OFF
+# Command: VC Monitor ON
 @app.on_message(filters.command(["vclogon", "checkvcon"]) & filters.group)
 async def start_vc_monitor(client: Client, message: Message):
-    if not message.chat:
+    # Safety check: error prevention
+    if not message or not message.chat:
         return
+    
+    # Check if user is admin (optional but recommended)
     chat_id = message.chat.id
     await db.update_one(
         {"chat_id": chat_id},
         {"$set": {"status": "on"}},
         upsert=True
     )
-    await message.reply("✅ **VC Monitoring ON:** Assistant ab participants ko track karega.")
+    await message.reply_text(f"✅ **VC Monitoring ON** in {message.chat.title}")
 
+# Command: VC Monitor OFF
 @app.on_message(filters.command(["vclogoff", "checkvcoff"]) & filters.group)
 async def stop_vc_monitor(client: Client, message: Message):
-    if not message.chat:
+    if not message or not message.chat:
         return
+        
     chat_id = message.chat.id
     await db.update_one(
         {"chat_id": chat_id},
         {"$set": {"status": "off"}},
         upsert=True
     )
-    await message.reply("❌ **VC Monitoring OFF.**")
+    await message.reply_text(f"❌ **VC Monitoring OFF** in {message.chat.title}")
