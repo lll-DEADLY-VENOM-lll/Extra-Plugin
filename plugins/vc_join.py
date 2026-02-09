@@ -1,27 +1,25 @@
 from pyrogram import Client, filters
 from pyrogram.types import Message
-from pytgcalls.types import Update
-from pytgcalls.types.groups import JoinedGroupCallParticipant, LeftGroupCallParticipant
+from pytgcalls.types import JoinedGroupCallParticipant, LeftGroupCallParticipant
 from VIPMUSIC.core.mongo import mongodb 
 from VIPMUSIC import app
 from VIPMUSIC.core.call import VIP
 
-# Function to check if monitoring is enabled
+# MongoDB check function
 def is_monitoring_enabled(chat_id):
     status = mongodb.vc_monitoring.find_one({"chat_id": chat_id})
     return status and status["status"] == "on"
 
-# FIX: VIP.one use karein (Ye Assistant 1 ka pytgcalls instance hai)
-@VIP.one.on_update()
-async def vc_update_handler(client, update: Update):
-    if not isinstance(update, (JoinedGroupCallParticipant, LeftGroupCallParticipant)):
-        return
-    
+# FIX: Version 1.2.9 mein 'on_participants_change' use hota hai
+@VIP.one.on_participants_change()
+async def vc_participants_handler(client, update):
     chat_id = update.chat_id
+    
+    # Check if monitoring is ON for this chat
     if not is_monitoring_enabled(chat_id):
         return
 
-    # User Join Update
+    # User Join Check
     if isinstance(update, JoinedGroupCallParticipant):
         user_id = update.participant.user_id
         mention = f"[User](tg://user?id={user_id})"
@@ -30,7 +28,7 @@ async def vc_update_handler(client, update: Update):
         except:
             pass
 
-    # User Leave Update
+    # User Leave Check
     elif isinstance(update, LeftGroupCallParticipant):
         user_id = update.participant.user_id
         mention = f"[User](tg://user?id={user_id})"
@@ -39,7 +37,7 @@ async def vc_update_handler(client, update: Update):
         except:
             pass
 
-# Commands
+# Commands to turn ON/OFF
 @app.on_message(filters.command("checkvc on") & filters.group)
 async def start_vc_monitor(client: Client, message: Message):
     chat_id = message.chat.id
@@ -48,7 +46,7 @@ async def start_vc_monitor(client: Client, message: Message):
         {"$set": {"status": "on"}},
         upsert=True
     )
-    await message.reply("✅ VC monitoring start ho gayi hai (Assistant 1 track karega).")
+    await message.reply("✅ **VC Monitoring ON:** Ab Assistant join/leave track karega.")
 
 @app.on_message(filters.command("checkvcoff") & filters.group)
 async def stop_vc_monitor(client: Client, message: Message):
@@ -57,4 +55,4 @@ async def stop_vc_monitor(client: Client, message: Message):
         {"chat_id": chat_id},
         {"$set": {"status": "off"}}
     )
-    await message.reply("❌ VC monitoring stop ho gayi hai.")
+    await message.reply("❌ **VC Monitoring OFF.**")
