@@ -1,3 +1,4 @@
+import asyncio
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pytgcalls.types import JoinedGroupCallParticipant, LeftGroupCallParticipant
@@ -8,7 +9,7 @@ from VIPMUSIC.core.call import VIP
 # MongoDB collection
 db = mongodb.vc_monitoring
 
-# MongoDB check function (Safely handled)
+# MongoDB check function
 async def is_monitoring_enabled(chat_id):
     if not chat_id:
         return False
@@ -18,10 +19,9 @@ async def is_monitoring_enabled(chat_id):
     except:
         return False
 
-# VC Participants Handler (Join/Leave track karne ke liye)
+# VC Participants Handler
 @VIP.one.on_participants_change()
 async def vc_participants_handler(client, update):
-    # Fix: Safely get chat_id from update
     chat_id = getattr(update, "chat_id", None)
     
     if not chat_id or not await is_monitoring_enabled(chat_id):
@@ -39,7 +39,6 @@ async def vc_participants_handler(client, update):
 
     if user_id:
         try:
-            # Username fetch karne ke liye user details nikalna
             user = await app.get_users(user_id)
             if user:
                 name = user.first_name or "User"
@@ -55,29 +54,21 @@ async def vc_participants_handler(client, update):
             else:
                 final_text = f"User ID `{user_id}` {action_text}"
 
-            await app.send_message(chat_id, final_text)
+            # Message bhejna aur 15 second baad delete karna
+            sent_msg = await app.send_message(chat_id, final_text)
+            await asyncio.sleep(15)
+            await sent_msg.delete()
             
         except Exception as e:
-            # Agar bot user details fetch na kar paye toh sirf ID bhej dega
-            print(f"Error fetching user in VC: {e}")
-            try:
-                await app.send_message(chat_id, f"User ID `{user_id}` {action_text}")
-            except:
-                pass
+            print(f"Error in VC Logger: {e}")
 
-# --- COMMANDS SECTION WITH FLOOD & NONETYPE FIX ---
+# --- COMMANDS SECTION ---
 
 @app.on_message(filters.command(["vclogon", "checkvcon"]) & filters.group)
 async def start_vc_monitor(client: Client, message: Message):
-    # Fix 1: Check if message and chat exist
     if not message or not message.chat:
         return
     
-    # Fix 2: Anonymous Admin handling (from_user is None)
-    if not message.from_user:
-        # Agar anonymous admin hai, toh hum sirf chat_id process karenge bina error ke
-        pass 
-
     chat_id = message.chat.id
     try:
         await db.update_one(
@@ -85,7 +76,10 @@ async def start_vc_monitor(client: Client, message: Message):
             {"$set": {"status": "on"}},
             upsert=True
         )
-        await message.reply_text(f"✅ **VC Monitoring ON**\nAb participants track kiye jayenge.")
+        msg = await message.reply_text(f"✅ **VC Monitoring ON**\n\nAb participants track kiye jayenge. (Ye message 15s mein delete ho jayega)")
+        await asyncio.sleep(15)
+        await msg.delete()
+        await message.delete() # User ka command bhi delete ho jayega
     except Exception as e:
         print(f"Error in vclogon: {e}")
 
@@ -101,6 +95,9 @@ async def stop_vc_monitor(client: Client, message: Message):
             {"$set": {"status": "off"}},
             upsert=True
         )
-        await message.reply_text("❌ **VC Monitoring OFF.**")
+        msg = await message.reply_text("❌ **VC Monitoring OFF.**\n\nAb alerts nahi milenge.")
+        await asyncio.sleep(15)
+        await msg.delete()
+        await message.delete()
     except Exception as e:
         print(f"Error in vclogoff: {e}")
