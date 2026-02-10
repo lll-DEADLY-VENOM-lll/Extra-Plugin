@@ -1,6 +1,7 @@
 import time
 import requests
 import io
+from urllib.parse import quote
 from VIPMUSIC import app
 from config import BANNED_USERS
 from pyrogram.enums import ChatAction, ParseMode
@@ -11,7 +12,10 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 CHAT_API_URL = "https://chatgpt.apinepdev.workers.dev/?question="
 IMAGE_API_URL = "https://pollinations.ai/p/"
 
-# 1. --- CHATGPT COMMAND (Aapka Purana Code) ---
+# -----------------------------------------------------------------------
+# 1. CHATGPT / AI TEXT COMMAND
+# -----------------------------------------------------------------------
+
 @app.on_message(filters.command(["chatgpt", "ai", "ask", "gpt", "solve"], prefixes=["+", ".", "/", "-", "", "$", "#", "&"]) & ~BANNED_USERS)
 async def chat_gpt(bot, message):
     try:
@@ -19,7 +23,7 @@ async def chat_gpt(bot, message):
 
         if len(message.command) < 2:
             return await message.reply_text(
-                "Example:\n\n`/chatgpt Where is the Taj Mahal?`",
+                "**Usage:**\n\n`/chatgpt Where is the Taj Mahal?` \n`/ai Write a poem about love.`",
                 parse_mode=ParseMode.MARKDOWN
             )
 
@@ -28,82 +32,110 @@ async def chat_gpt(bot, message):
 
         if response.status_code == 200:
             json_data = response.json()
-
             if "answer" in json_data:
                 answer = json_data["answer"]
 
-                # Aapka purana filtering logic
-                unwanted_phrases = [
-                    "🔗 Join our community",
-                    "t.me/",
-                    "Answered by",
-                    "Join our Telegram"
-                ]
+                # Cleaning unwanted ads/links
+                unwanted_phrases = ["🔗 Join our community", "t.me/", "Answered by", "Join our Telegram"]
                 for phrase in unwanted_phrases:
                     if phrase.lower() in answer.lower():
                         answer = answer.split(phrase)[0].strip()
 
-                buttons = InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("✙ ʌᴅᴅ ϻє ɪη ʏσυʀ ɢʀσυᴘ ✙", url=f"https://t.me/{app.username}?startgroup=true")]]
-                )
+                buttons = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("✙ ʌᴅᴅ ϻє ɪη ʏσυʀ ɢʀσυᴘ ✙", url=f"https://t.me/{app.username}?startgroup=true")
+                ]])
 
                 return await message.reply_text(
-                    f"**🤖 𝐘ᴏᴜʀ ᴀɴsᴡᴇʀ :**\n\n{answer}",
+                    f"**🤖 𝐀ɪ 𝐑ᴇsᴘᴏɴsᴇ :**\n\n{answer}",
                     parse_mode=ParseMode.MARKDOWN,
                     reply_markup=buttons
                 )
             else:
-                return await message.reply_text("⚠️ No valid answer found.")
+                return await message.reply_text("⚠️ No valid answer found in the API response.")
         else:
-            return await message.reply_text(f"⚠️ API Error: {response.status_code}")
+            return await message.reply_text(f"⚠️ API Error: Status code {response.status_code}")
 
     except Exception as e:
         return await message.reply_text(f"⚠️ **Error:** `{str(e)}`", parse_mode=ParseMode.MARKDOWN)
 
 
-# 2. --- PHOTO GENERATION COMMAND (Naya Feature) ---
-@app.on_message(filters.command(["generate", "draw", "photo", "imagine", "aiart"], prefixes=["+", ".", "/", "-", "", "$", "#", "&"]) & ~BANNED_USERS)
+# -----------------------------------------------------------------------
+# 2. PHOTO GENERATION / AI IMAGE COMMAND
+# -----------------------------------------------------------------------
+
+@app.on_message(filters.command(["generate", "draw", "photo", "imagine", "art"], prefixes=["+", ".", "/", "-", "", "$", "#", "&"]) & ~BANNED_USERS)
 async def generate_image(bot, message):
     try:
         if len(message.command) < 2:
             return await message.reply_text(
-                "**Kya banau?**\nExample: `/generate a red car on a dark blue road`"
+                "**Usage:**\n\n`/generate a beautiful girl in red dress` \n`/draw a neon blue lion in space`",
+                parse_mode=ParseMode.MARKDOWN
             )
 
         prompt = message.text.split(None, 1)[1]
-        m = await message.reply_text("🎨 **Wait... I am drawing your imagination...**")
+        wait_msg = await message.reply_text("🎨 **Wait... Drawing your imagination...**")
         
         await bot.send_chat_action(message.chat.id, ChatAction.UPLOAD_PHOTO)
 
-        # Image generation logic
-        encoded_prompt = prompt.replace(" ", "%20")
-        gen_url = f"{IMAGE_API_URL}{encoded_prompt}?width=1024&height=1024&model=flux"
+        # Prompt encoding for URL (Handling spaces and special characters)
+        encoded_prompt = quote(prompt)
+        # Using Pollinations AI with high resolution settings
+        gen_url = f"{IMAGE_API_URL}{encoded_prompt}?width=1024&height=1024&model=flux&seed={int(time.time())}"
+
+        try:
+            # Downloading the image to avoid "IMAGE_PROCESS_FAILED" error
+            response = requests.get(gen_url, timeout=30)
+            if response.status_code == 200:
+                photo = io.BytesIO(response.content)
+                photo.name = "ai_image.jpg"
+
+                await message.reply_photo(
+                    photo=photo,
+                    caption=f"**✨ Prompt:** `{prompt}`\n**🤖 Generated by:** @{app.username}",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("✙ ʌᴅᴅ ϻє ɪη ʏσυʀ ɢʀσυᴘ ✙", url=f"https://t.me/{app.username}?startgroup=true")
+                    ]])
+                )
+                await wait_msg.delete()
+            else:
+                await wait_msg.edit("❌ Failed to generate image from API.")
         
-        # Image download kar ke bhejna taaki error na aaye
-        img_res = requests.get(gen_url)
-        if img_res.status_code == 200:
-            photo = io.BytesIO(img_res.content)
-            photo.name = "ai_image.jpg"
-            
-            await message.reply_photo(
-                photo=photo,
-                caption=f"**✨ Prompt:** `{prompt}`\n**🤖 Generated by:** @{app.username}",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✙ ʌᴅᴅ ϻє ɪη ʏσυʀ ɢʀσυᴘ ✙", url=f"https://t.me/{app.username}?startgroup=true")]])
-            )
-            await m.delete()
-        else:
-            await m.edit("❌ Failed to generate image. Try again later.")
+        except Exception as e:
+            # Fallback: Trying to send via URL if download fails
+            try:
+                await message.reply_photo(
+                    photo=gen_url,
+                    caption=f"**✨ Prompt:** `{prompt}`\n**🤖 Generated by:** @{app.username}",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("✙ ʌᴅᴅ ϻє ɪη ʏσυʀ ɢʀσυᴘ ✙", url=f"https://t.me/{app.username}?startgroup=true")
+                    ]])
+                )
+                await wait_msg.delete()
+            except Exception as final_err:
+                await wait_msg.edit(f"❌ **Error:** `{str(final_err)}`")
 
     except Exception as e:
-        await message.reply_text(f"⚠️ **Error:** `{str(e)}`")
+        await message.reply_text(f"⚠️ **General Error:** `{str(e)}`", parse_mode=ParseMode.MARKDOWN)
 
+
+# -----------------------------------------------------------------------
+# MODULE INFO FOR HELP MENU
+# -----------------------------------------------------------------------
 
 __MODULE__ = "Aɪ-Bᴏᴛ"
 __HELP__ = """
-**Chatting Commands:**
-/ai, /chatgpt, /ask - Ask anything from AI.
+**🤖 AI Chat & Photo Commands:**
 
-**Image Commands:**
-/generate, /draw, /photo - Generate AI images with any color or style.
-Example: `/generate a beautiful girl in red dress`
+**1. Text Generation:**
+- `/ai [query]` : Ask anything (e.g., /ai how to code)
+- `/chatgpt [query]` : ChatGPT response
+- `/ask [query]` : Solve your doubts
+
+**2. Image Generation:**
+- `/generate [prompt]` : Create high-quality AI images
+- `/draw [prompt]` : Draw your imagination
+- `/photo [prompt]` : Get any photo in any color
+
+**Example:**
+`/generate a red rose in a blue bottle with neon lights`
 """
