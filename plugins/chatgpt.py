@@ -1,67 +1,59 @@
+import time
 import requests
-from pyrogram import filters
-from pyrogram.enums import ChatAction
 from VIPMUSIC import app
-from config import BANNED_USERS
+from config import BOT_USERNAME
+from pyrogram.enums import ChatAction, ParseMode
+from pyrogram import filters
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Ek common function AI response fetch karne ke liye
-def get_ai_response(prompt):
+API_URL = "https://chatgpt.apinepdev.workers.dev/?question="
+
+@app.on_message(filters.command(["chatgpt", "ai", "ask", "gpt", "solve"], prefixes=["+", ".", "/", "-", "", "$", "#", "&"]))
+async def chat_gpt(bot, message):
     try:
-        # Hum yahan ek free public API use kar rahe hain
-        url = f"https://chnm-ai-api.vercel.app/chat?q={prompt}"
-        response = requests.get(url)
+        await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
+
+        if len(message.command) < 2:
+            return await message.reply_text(
+                "Example:\n\n`/chatgpt Where is the Taj Mahal?`",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+        question = message.text.split(' ', 1)[1]
+        response = requests.get(f"{API_URL}{question}")
+
         if response.status_code == 200:
-            data = response.json()
-            return data.get("reply", "Sorry, response nahi mil paya.")
+            json_data = response.json()
+
+            if "answer" in json_data:
+                answer = json_data["answer"]
+
+                unwanted_phrases = [
+                    "🔗 Join our community",
+                    "t.me/",
+                    "Answered by",
+                    "Join our Telegram"
+                ]
+                for phrase in unwanted_phrases:
+                    if phrase.lower() in answer.lower():
+                        answer = answer.split(phrase)[0].strip()
+
+            
+                buttons = InlineKeyboardMarkup(
+                    [[
+                        InlineKeyboardButton("✙ ʌᴅᴅ ϻє ɪη ʏσυʀ ɢʀσυᴘ ✙", url=f"https://t.me/{app.username}?startgroup=true")
+                    ]]
+                )
+
+                return await message.reply_text(
+                    f"**🤖 𝐘ᴏᴜʀ ᴀɴsᴡᴇʀ :**\n\n{answer}",
+                    parse_mode=ParseMode.MARKDOWN,
+                    reply_markup=buttons
+                )
+            else:
+                return await message.reply_text("⚠️ No valid answer found in the response.")
         else:
-            return "API me error hai, baad me koshish karein."
+            return await message.reply_text(f"⚠️ API Error: Received status code {response.status_code}")
+
     except Exception as e:
-        return f"Error: {e}"
-
-@app.on_message(filters.command(["detect", "aidetect", "asklang"]) & ~BANNED_USERS)
-async def chatgpt_chat_lang(bot, message):
-    if len(message.command) < 2 and not message.reply_to_message:
-        await message.reply_text("**Provide any text after command or reply to any message**")
-        return
-
-    if message.reply_to_message and message.reply_to_message.text:
-        user_text = message.reply_to_message.text
-    else:
-        user_text = " ".join(message.command[1:])
-
-    user_input = f"""
-    Sentences :- {user_text}
-    Mujhe is sentence ka language name aur code batao, aur usi language me ek chhota sa reply do.
-    Format:
-    Lang :- 
-    Code :- 
-    Reply :- 
-    """
-
-    await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
-    results = get_ai_response(user_input)
-    await message.reply_text(results)
-
-
-@app.on_message(filters.command(["chatgpt", "ai", "ask"]) & ~BANNED_USERS)
-async def chatgpt_chat(bot, message):
-    if len(message.command) < 2 and not message.reply_to_message:
-        await message.reply_text(
-            "Example:\n\n`/ai write simple website code using html css, js?`"
-        )
-        return
-
-    if message.reply_to_message and message.reply_to_message.text:
-        user_input = message.reply_to_message.text
-    else:
-        user_input = " ".join(message.command[1:])
-
-    await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
-    results = get_ai_response(user_input)
-    await message.reply_text(results)
-
-__MODULE__ = "CʜᴀᴛGᴘᴛ"
-__HELP__ = """
-/ai [ǫᴜᴇʀʏ] - ᴀsᴋ ʏᴏᴜʀ ǫᴜᴇsᴛɪᴏɴ ᴡɪᴛʜ ᴀɪ
-/detect [ᴛᴇxᴛ] - ᴅᴇᴛᴇᴄᴛ ʟᴀɴɢᴜᴀɢᴇ ᴀɴᴅ ɢᴇᴛ ʀᴇᴘʟʏ
-"""
+        return await message.reply_text(f"⚠️ **Error:** `{str(e)}`", parse_mode=ParseMode.MARKDOWN)
