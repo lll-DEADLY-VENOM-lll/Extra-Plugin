@@ -11,17 +11,16 @@ __MODULE__ = "Bio Remover"
 __HELP__ = """
 <b><u>Bio Link Protector</u></b>
 
-Yeh module group ko spam se bachata hai. Agar kisi user ke profile bio mein link hoga, toh bot unhe message karne se rokega.
+Yeh module un logo ko rokta hai jinke bio (description) mein link hota hai.
 
-<b>Strike System:</b>
-• Pehli 2 baar message delete hoga aur warning di jayegi.
-• Teesri (3rd) baar link ke saath message karne par user ko <b>Mute</b> kar diya jayega.
+<b>Features:</b>
+• Link milne par message delete hota hai.
+• Bot user ko tag karke warning deta hai.
+• 3 strikes ke baad user ko Mute kar diya jata hai.
 
-<b>Admin Commands:</b>
-• /approve - Kisi user ke message par reply karke use whitelist karein (woh link ke sath bhi message kar payega).
-• /unapprove - Reply karke user ko whitelist se hatayein.
-
-<i>Note: Bot ko Admin banana aur Delete Messages/Ban Users permission dena zaroori hai.</i>
+<b>Commands:</b>
+• /approve - Reply karke user ko allow karein.
+• /unapprove - Reply karke whitelist se hatayein.
 """
 
 # Memory storage
@@ -39,7 +38,7 @@ async def is_admin(chat_id, user_id):
     except Exception:
         return False
 
-# Main Message Handler
+# Main Handler
 @app.on_message(filters.group & ~filters.service, group=10)
 async def bio_remover_handler(client, message):
     if not message.from_user:
@@ -47,82 +46,87 @@ async def bio_remover_handler(client, message):
 
     user_id = message.from_user.id
     chat_id = message.chat.id
+    username = f"@{message.from_user.username}" if message.from_user.username else "No Username"
 
     # 1. Skip Admins and Approved Users
     if user_id in approved_users or await is_admin(chat_id, user_id):
         return
 
-    # 2. Check Bio
+    # 2. Check Bio (Description)
     try:
-        full_user = await client.get_users(user_id)
-        bio = full_user.bio if full_user.bio else ""
+        full_user_chat = await client.get_chat(user_id)
+        bio = full_user_chat.description if full_user_chat.description else ""
         
-        # Agar bio mein link ya username mile
         if re.search(URL_PATTERN, bio, re.IGNORECASE):
+            # Message delete karein
+            try:
+                await message.delete()
+            except:
+                pass
             
-            # Update warning count
+            # Strike System logic
             current_warns = warning_count.get(user_id, 0) + 1
             warning_count[user_id] = current_warns
 
             if current_warns < 3:
-                # Pehli aur doosri baar sirf delete aur warning
-                try:
-                    await message.delete()
-                except:
-                    pass
+                # User ko tag karke message bhejein
+                warn_text = (
+                    f"⚠️ <b>Link Detected in Bio!</b>\n\n"
+                    f"👤 <b>User:</b> {message.from_user.mention}\n"
+                    f"🆔 <b>Username:</b> {username}\n\n"
+                    f"❌ Aapka message delete kar diya gaya hai kyunki aapke bio mein link hai. "
+                    f"Kripya link hatayein warna aapko mute kar diya jayega.\n"
+                    f"🚩 <b>Warning:</b> {current_warns}/3"
+                )
+                warn_msg = await client.send_message(chat_id, warn_text)
                 
-                warn_text = f"⚠️ {message.from_user.mention}, aapke bio mein link hai. Message allow nahi hai. (Warning: {current_warns}/3)"
-                warn_msg = await message.reply(warn_text)
-                
-                # 5 second baad warning message delete karein taaki chat saaf rahe
-                await asyncio.sleep(5)
+                # 8 second baad warning message delete karein taaki chat saaf rahe
+                await asyncio.sleep(8)
                 try:
                     await warn_msg.delete()
                 except:
                     pass
             
             else:
-                # Teesre message par Mute
+                # 3rd strike par Mute
                 try:
-                    await message.delete()
                     await client.restrict_chat_member(
                         chat_id, 
                         user_id, 
                         ChatPermissions(can_send_messages=False)
                     )
-                    await message.reply_text(
-                        f"🚫 {message.from_user.mention} ko mute kar diya gaya hai. "
-                        f"Kyunki unhone bio link ke saath 3 baar message karne ki koshish ki."
+                    await client.send_message(
+                        chat_id,
+                        f"🚫 <b>User Muted!</b>\n\n"
+                        f"👤 {message.from_user.mention} ({username}) ko permanently mute kar diya gaya hai. "
+                        f"Kyunki unhone bio link ke saath baar-baar message bhejne ki koshish ki."
                     )
                 except Exception as e:
                     print(f"Mute Error: {e}")
                 
-                # Strike reset karein mute ke baad
                 warning_count[user_id] = 0
 
     except Exception as e:
-        # User details fetch karne mein error (profile privacy ki wajah se ho sakta hai)
         print(f"Bio Check Error: {e}")
 
 # Command: /approve
 @app.on_message(filters.command("approve") & filters.group)
 async def approve_user_bio(client, message):
     if not await is_admin(message.chat.id, message.from_user.id):
-        return await message.reply("Sirf Admins hi approve kar sakte hain.")
+        return
     
     if message.reply_to_message:
         target_id = message.reply_to_message.from_user.id
         approved_users.add(target_id)
         
-        # Unmute if previously restricted
         try:
             await client.restrict_chat_member(message.chat.id, target_id, ChatPermissions(can_send_messages=True))
         except:
             pass
         
-        await message.reply(f"✅ {message.reply_to_message.from_user.first_name} ko approve kar diya gaya hai. Ab yeh link ke sath message kar sakte hain.")
+        await message.reply(f"✅ {message.reply_to_message.from_user.mention} ko whitelist mein add kar diya gaya hai.")
     else:
-        await message.reply("Kisi user ke message par reply karke `/approve` likhein.")
+        await message.reply("Reply to a user to approve them.")
 
 # Command: /unapprove
 @app.on_message(filters.command("unapprove") & filters.group)
@@ -134,8 +138,4 @@ async def unapprove_user_bio(client, message):
         target_id = message.reply_to_message.from_user.id
         if target_id in approved_users:
             approved_users.remove(target_id)
-            await message.reply("❌ User ko whitelist se hata diya gaya hai.")
-        else:
-            await message.reply("Yeh user pehle se approved list mein nahi hai.")
-    else:
-        await message.reply("Reply to a user to unapprove them.")
+            await message.reply(f"❌ {message.reply_to_message.from_user.mention} ko whitelist se hata diya gaya.")
