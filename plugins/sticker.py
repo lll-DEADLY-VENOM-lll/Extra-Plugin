@@ -14,6 +14,7 @@ from pyrogram.errors import (
     StickerPngDimensions,
     StickerPngNopng,
     UserIsBlocked,
+    StickersetInvalid,  # Added this
 )
 from pyrogram.file_id import FileId
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -21,6 +22,7 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from VIPMUSIC import app
 from utils.error import capture_err
 
+# Bot username ko safely handle karne ke liye
 BOT_USERNAME = app.username
 
 MAX_STICKERS = (
@@ -40,14 +42,8 @@ async def get_sticker_set_by_name(
                 hash=0,
             )
         )
-    except errors.exceptions.not_acceptable_406.StickersetInvalid:
+    except StickersetInvalid: # Sabhi tarah ke StickersetInvalid error catch honge (400 aur 406 dono)
         return None
-
-
-# Known errors: (I don't see a reason to catch them as we, for sure, won't face them right now):
-# errors.exceptions.bad_request_400.PackShortNameInvalid -> pack name needs to end with _by_botname
-# errors.exceptions.bad_request_400.ShortnameOccupyFailed -> pack's name
-# is already in use
 
 
 async def create_sticker_set(
@@ -108,11 +104,13 @@ async def resize_file_to_sticker_size(file_path: str) -> str:
     else:
         im.thumbnail(STICKER_DIMENSIONS)
     try:
-        os.remove(file_path)
-        file_path = f"{file_path}.png"
+        new_path = f"{file_path}.png"
+        im.save(new_path)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        return new_path
+    except Exception:
         return file_path
-    finally:
-        im.save(file_path)
 
 
 async def upload_document(
@@ -154,13 +152,8 @@ async def get_document_from_file_id(
 @capture_err
 async def sticker_id(_, message: Message):
     reply = message.reply_to_message
-
-    if not reply:
+    if not reply or not reply.sticker:
         return await message.reply("Reply to a sticker.")
-
-    if not reply.sticker:
-        return await message.reply("Reply to a sticker.")
-
     await message.reply_text(f"`{reply.sticker.file_id}`")
 
 
@@ -168,11 +161,7 @@ async def sticker_id(_, message: Message):
 @capture_err
 async def sticker_image(_, message: Message):
     r = message.reply_to_message
-
-    if not r:
-        return await message.reply("Reply to a sticker.")
-
-    if not r.sticker:
+    if not r or not r.sticker:
         return await message.reply("Reply to a sticker.")
 
     m = await message.reply("Sending..")
@@ -186,7 +175,8 @@ async def sticker_image(_, message: Message):
     )
 
     await m.delete()
-    os.remove(f)
+    if os.path.exists(f):
+        os.remove(f)
 
 
 @app.on_message(filters.command("kang"))
@@ -196,6 +186,7 @@ async def kang(client, message: Message):
         return await message.reply_text("Reply to a sticker/image to kang it.")
     if not message.from_user:
         return await message.reply_text("You are anon admin, kang stickers in my pm.")
+    
     msg = await message.reply_text("Kanging Sticker..")
 
     # Find the proper emoji
@@ -225,13 +216,13 @@ async def kang(client, message: Message):
             image_type = imghdr.what(temp_file_path)
             if image_type not in SUPPORTED_TYPES:
                 return await msg.edit("Format not supported! ({})".format(image_type))
+            
             try:
                 temp_file_path = await resize_file_to_sticker_size(temp_file_path)
             except OSError as e:
                 await msg.edit_text("Something wrong happened.")
-                raise Exception(
-                    f"Something went wrong while resizing the sticker (at {temp_file_path}); {e}"
-                )
+                return
+
             sticker = await create_sticker(
                 await upload_document(client, temp_file_path, message.chat.id),
                 sticker_emoji,
@@ -240,78 +231,64 @@ async def kang(client, message: Message):
                 os.remove(temp_file_path)
         else:
             return await msg.edit("Nope, can't kang that.")
+            
     except ShortnameOccupyFailed:
         await message.reply_text("Change Your Name Or Username")
         return
-
     except Exception as e:
-        await message.reply_text(str(e))
-        e = format_exc()
-        return print(e)
+        await message.reply_text(f"Error: {e}")
+        return
 
-    # Find an available pack & add the sticker to the pack; create a new pack if needed
-    # Would be a good idea to cache the number instead of searching it every
-    # single time...
+    # Pack name logic
+    # Telegram sticker pack names must be lowercase
+    bot_username = (await client.get_me()).username
     packnum = 0
-    packname = "f" + str(message.from_user.id) + "_by_" + BOT_USERNAME
+    packname = f"f{message.from_user.id}_by_{bot_username}"
     limit = 0
+    
     try:
         while True:
-            # Prevent infinite rules
             if limit >= 50:
                 return await msg.delete()
 
             stickerset = await get_sticker_set_by_name(client, packname)
+            
             if not stickerset:
-                stickerset = await create_sticker_set(
-                    client,
-                    message.from_user.id,
-                    f"{message.from_user.first_name[:32]}'s kang pack",
-                    packname,
-                    [sticker],
-                )
+                # Create NEW pack
+                try:
+                    stickerset = await create_sticker_set(
+                        client,
+                        message.from_user.id,
+                        f"{message.from_user.first_name[:32]}'s kang pack",
+                        packname,
+                        [sticker],
+                    )
+                except errors.exceptions.bad_request_400.PeerIdInvalid:
+                    return await msg.edit("Please start the bot in private first.")
             elif stickerset.set.count >= MAX_STICKERS:
+                # Pack full, try next one
                 packnum += 1
-                packname = (
-                    "f"
-                    + str(packnum)
-                    + "_"
-                    + str(message.from_user.id)
-                    + "_by_"
-                    + BOT_USERNAME
-                )
+                packname = f"f{packnum}_{message.from_user.id}_by_{bot_username}"
                 limit += 1
                 continue
             else:
+                # Add to EXISTING pack
                 try:
                     await add_sticker_to_set(client, stickerset, sticker)
                 except StickerEmojiInvalid:
                     return await msg.edit("[ERROR]: INVALID_EMOJI_IN_ARGUMENT")
-            limit += 1
             break
 
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(text="sᴇᴇ ᴘᴀᴄᴋ", url=f"t.me/addstickers/{packname}")]])
-        
         await msg.edit(f"Sticker Kanged.\nEmoji: {sticker_emoji}", reply_markup=keyboard)
             
-        
     except (PeerIdInvalid, UserIsBlocked):
         keyboard = InlineKeyboardMarkup(
-            [[InlineKeyboardButton(text="Start", url=f"t.me/{BOT_USERNAME}")]]
+            [[InlineKeyboardButton(text="Start", url=f"t.me/{bot_username}")]]
         )
-        await msg.edit(
-            "You Need To Start A Private Chat With Me.",
-            reply_markup=keyboard,
-        )
-    except StickerPngNopng:
-        await message.reply_text(
-            "Stickers must be png files but the provided image was not a png"
-        )
-    except StickerPngDimensions:
-        await message.reply_text("The sticker png dimensions are invalid.")
-
-
-
+        await msg.edit("You Need To Start A Private Chat With Me.", reply_markup=keyboard)
+    except Exception as e:
+        await msg.edit(f"Error: {str(e)}")
 
 __MODULE__ = "Sᴛɪᴄᴋᴇʀ"
 __HELP__ = """
@@ -320,8 +297,4 @@ __HELP__ = """
 • /stickerid - **ɢᴇᴛs ᴛʜᴇ ғɪʟᴇ ɪᴅ ᴏғ ᴀɴʏ ʀᴇᴘʟɪᴇᴅ sᴛɪᴄᴋᴇʀ.**
 • /getsticker - **ɢᴇᴛs ᴛʜᴇ ɪᴍᴀɢᴇ ᴏғ ᴀɴʏ ʀᴇᴘʟɪᴇᴅ sᴛɪᴄᴋᴇʀ.**
 • /kang - **ᴋᴀɴɢs ᴀɴʏ sᴛɪᴄᴋᴇʀ ɪɴ ᴛʜᴇ ʏᴏᴜ ᴘᴀᴄᴋ**
-
-**INFO:**
-
-- ᴛʜɪs ʙᴏᴛ ᴀʟʟᴏᴡs ᴜsᴇʀs ᴛᴏ ɢᴇᴛ ᴛʜᴇ ғɪʟᴇ ɪᴅ ᴏʀ ᴛʜᴇ ɪᴍᴀɢᴇ ᴏғ ᴀɴʏ sᴛɪᴄᴋᴇʀ ᴛʜᴀᴛ ɪs ʀᴇᴘʟɪᴇᴅ ᴛᴏ ᴀ ᴍᴇssᴀɢᴇ, ᴀɴᴅ ᴀʟsᴏ ᴀʟʟᴏᴡs ᴜsᴇʀs ᴛᴏ ᴋᴀɴɢ ᴀɴʏ sᴛɪᴄᴋᴇʀ ɪɴ ᴛʜᴇ ᴄʜᴀᴛ ᴀɴᴅ ᴀᴅᴅ ɪᴛ ᴛᴏ ᴀ sᴛɪᴄᴋᴇʀ ᴘᴀᴄᴋ.
 """
