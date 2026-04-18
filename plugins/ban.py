@@ -33,7 +33,6 @@ warnsdb = mongodb.warns
 __MODULE__ = "Bᴀɴ"
 __HELP__ = """
 /ban - Ban A User
-/banall - Ban All Users
 /sban - Delete all messages of user that sended in group and ban the user
 /tban - Ban A User For Specific Time
 /unban - Unban A User
@@ -227,10 +226,6 @@ async def banFunc(_, message: Message):
 @app.on_message(filters.command("unban") & ~filters.private & ~BANNED_USERS)
 @adminsOnly("can_restrict_members")
 async def unban_func(_, message: Message):
-    # we don't need reasons for unban, also, we
-    # don't need to get "text_mention" entity, because
-    # normal users won't get text_mention if the user
-    # they want to unban is not in the group.
     reply = message.reply_to_message
     user_id = await extract_user(message)
     if not user_id:
@@ -248,9 +243,6 @@ async def unban_func(_, message: Message):
 
 
 # Promote Members
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-
-
 @app.on_message(
     filters.command(["promote", "fullpromote"]) & ~filters.private & ~BANNED_USERS
 )
@@ -313,7 +305,6 @@ async def promoteFunc(_, message: Message):
             )
         )
 
-# Handle callback to check and toggle admin powers
 @app.on_callback_query(filters.regex(r"^check_powers_(\d+)"))
 async def check_powers_callback(_, query: CallbackQuery):
     user_id = int(query.data.split("_")[2])
@@ -358,7 +349,6 @@ async def check_powers_callback(_, query: CallbackQuery):
         reply_markup=InlineKeyboardMarkup(generate_privilege_buttons(user_privileges))
     )
 
-# Toggle admin power
 @app.on_callback_query(filters.regex(r"^toggle_(.+)_(\d+)"))
 async def toggle_power_callback(_, query: CallbackQuery):
     power, user_id = query.data.split("_")[1], int(query.data.split("_")[2])
@@ -367,10 +357,8 @@ async def toggle_power_callback(_, query: CallbackQuery):
     if not bot or not getattr(bot, power, False):
         return await query.answer("I have no this power to give anyone", show_alert=True)
 
-    # Get current user privileges
     current_privs = (await app.get_chat_member(query.message.chat.id, user_id)).privileges
 
-    # Toggle the selected power
     new_privs = ChatPrivileges(
         can_change_info=current_privs.can_change_info,
         can_invite_users=current_privs.can_invite_users,
@@ -383,7 +371,6 @@ async def toggle_power_callback(_, query: CallbackQuery):
     )
     setattr(new_privs, power, not getattr(current_privs, power))
 
-    # Apply the new privileges
     await query.message.chat.promote_member(
         user_id=user_id,
         privileges=new_privs
@@ -393,8 +380,6 @@ async def toggle_power_callback(_, query: CallbackQuery):
         f"{'Allowed' if getattr(new_privs, power) else 'Disallowed'} {power.replace('_', ' ').capitalize()}",
         show_alert=True
     )
-
-    # Update the buttons and caption
     await check_powers_callback(_, query)
 
 @app.on_callback_query(filters.regex(r"^close"))
@@ -404,9 +389,6 @@ async def close_callback(_, query: CallbackQuery):
 @app.on_callback_query(filters.regex(r"^back"))
 async def back_callback(_, query: CallbackQuery):
     await query.message.edit_caption("Action cancelled.")
-
-
-# Demote Member
 
 
 @app.on_message(filters.command("purge") & ~filters.private)
@@ -429,30 +411,14 @@ async def purgeFunc(_, message: Message):
     chat_id = message.chat.id
     message_ids = []
 
-    for message_id in range(
-        repliedmsg.id,
-        purge_to,
-    ):
+    for message_id in range(repliedmsg.id, purge_to):
         message_ids.append(message_id)
-
-        # Max message deletion limit is 100
         if len(message_ids) == 100:
-            await app.delete_messages(
-                chat_id=chat_id,
-                message_ids=message_ids,
-                revoke=True,  # For both sides
-            )
-
-            # To delete more than 100 messages, start again
+            await app.delete_messages(chat_id=chat_id, message_ids=message_ids, revoke=True)
             message_ids = []
 
-    # Delete if any messages left
     if len(message_ids) > 0:
-        await app.delete_messages(
-            chat_id=chat_id,
-            message_ids=message_ids,
-            revoke=True,
-        )
+        await app.delete_messages(chat_id=chat_id, message_ids=message_ids, revoke=True)
 
 
 @app.on_message(filters.command("del") & ~filters.private)
@@ -473,9 +439,7 @@ async def demote(_, message: Message):
     if user_id == app.id:
         return await message.reply_text("I can't demote myself.")
     if user_id in SUDOERS:
-        return await message.reply_text(
-            "You wanna demote the elevated one?, RECONSIDER!"
-        )
+        return await message.reply_text("You wanna demote the elevated one?, RECONSIDER!")
     try:
         member = await app.get_chat_member(message.chat.id, user_id)
         if member.status == ChatMemberStatus.ADMINISTRATOR:
@@ -500,24 +464,20 @@ async def demote(_, message: Message):
         await message.reply_text(e)
 
 
-# Pin Messages
-
-
 @app.on_message(filters.command(["unpinall"]) & filters.group & ~BANNED_USERS)
 @adminsOnly("can_pin_messages")
-async def pin(_, message: Message):
-    if message.command[0] == "unpinall":
-        return await message.reply_text(
-            "Aʀᴇ ʏᴏᴜ sᴜʀᴇ ʏᴏᴜ ᴡᴀɴᴛ ᴛᴏ ᴜɴᴘɪɴ ᴀʟʟ ᴍᴇssᴀɢᴇs?",
-            reply_markup=InlineKeyboardMarkup(
+async def pin_all(_, message: Message):
+    return await message.reply_text(
+        "Aʀᴇ ʏᴏᴜ sᴜʀᴇ ʏᴏᴜ ᴡᴀɴᴛ ᴛᴏ ᴜɴᴘɪɴ ᴀʟʟ ᴍᴇssᴀɢᴇs?",
+        reply_markup=InlineKeyboardMarkup(
+            [
                 [
-                    [
-                        InlineKeyboardButton(text="ʏᴇs", callback_data="unpin_yes"),
-                        InlineKeyboardButton(text="ɴᴏ", callback_data="unpin_no"),
-                    ],
-                ]
-            ),
-        )
+                    InlineKeyboardButton(text="ʏᴇs", callback_data="unpin_yes"),
+                    InlineKeyboardButton(text="ɴᴏ", callback_data="unpin_no"),
+                ],
+            ]
+        ),
+    )
 
 
 @app.on_callback_query(filters.regex(r"unpin_(yes|no)"))
@@ -526,34 +486,23 @@ async def callback_query_handler(_, query: CallbackQuery):
         await app.unpin_all_chat_messages(query.message.chat.id)
         return await query.message.edit_text("Aʟʟ ᴘɪɴɴᴇᴅ ᴍᴇssᴀɢᴇs ʜᴀᴠᴇ ʙᴇᴇɴ ᴜɴᴘɪɴɴᴇᴅ.")
     elif query.data == "unpin_no":
-        return await query.message.edit_text(
-            "Uɴᴘɪɴ ᴏғ ᴀʟʟ ᴘɪɴɴᴇᴅ ᴍᴇssᴀɢᴇs ʜᴀs ʙᴇᴇɴ ᴄᴀɴᴄᴇʟʟᴇᴅ."
-        )
+        return await query.message.edit_text("Uɴᴘɪɴ ᴏғ ᴀʟʟ ᴘɪɴɴᴇᴅ ᴍᴇssᴀɢᴇs ʜᴀs ʙᴇᴇɴ ᴄᴀɴᴄᴇʟʟᴇᴅ.")
 
 
 @app.on_message(filters.command(["pin", "unpin"]) & ~filters.private & ~BANNED_USERS)
 @adminsOnly("can_pin_messages")
-async def pin(_, message: Message):
+async def pin_single(_, message: Message):
     if not message.reply_to_message:
         return await message.reply_text("Reply to a message to pin/unpin it.")
     r = message.reply_to_message
     if message.command[0][0] == "u":
         await r.unpin()
-        return await message.reply_text(
-            f"Unpinned [this]({r.link}) message.",
-            disable_web_page_preview=True,
-        )
+        return await message.reply_text(f"Unpinned [this]({r.link}) message.", disable_web_page_preview=True)
     await r.pin(disable_notification=True)
-    await message.reply(
-        f"Pinned [this]({r.link}) message.",
-        disable_web_page_preview=True,
-    )
+    await message.reply(f"Pinned [this]({r.link}) message.", disable_web_page_preview=True)
     msg = "Please check the pinned message: ~ " + f"[Check, {r.link}]"
     filter_ = dict(type="text", data=msg)
     await save_filter(message.chat.id, "~pinned", filter_)
-
-
-# Mute members
 
 
 @app.on_message(filters.command(["mute", "tmute"]) & ~filters.private & ~BANNED_USERS)
@@ -572,9 +521,8 @@ async def mute(_, message: Message):
             chat_id=message.chat.id, filter=ChatMembersFilter.ADMINISTRATORS
         )
     ]:
-        return await message.reply_text(
-            "I can't mute an admin, You know the rules, so do i."
-        )
+        return await message.reply_text("I can't mute an admin, You know the rules, so do i.")
+    
     mention = (await app.get_users(user_id)).mention
     keyboard = ikb({"🚨  Unmute  🚨": f"unmute_{user_id}"})
     msg = (
@@ -591,11 +539,7 @@ async def mute(_, message: Message):
             msg += f"**Reason:** {temp_reason}"
         try:
             if len(time_value[:-1]) < 3:
-                await message.chat.restrict_member(
-                    user_id,
-                    permissions=ChatPermissions(),
-                    until_date=temp_mute,
-                )
+                await message.chat.restrict_member(user_id, permissions=ChatPermissions(), until_date=temp_mute)
                 replied_message = message.reply_to_message
                 if replied_message:
                     message = replied_message
@@ -638,18 +582,15 @@ async def warn_user(_, message: Message):
     if user_id == app.id:
         return await message.reply_text("ɪ ᴄᴀɴ'ᴛ ᴡᴀʀɴ ᴍʏsᴇʟғ, ɪ ᴄᴀɴ ʟᴇᴀᴠᴇ ɪғ ʏᴏᴜ ᴡᴀɴᴛ.")
     if user_id in SUDOERS:
-        return await message.reply_text(
-            "ɪ ᴄᴀɴ'ᴛ ᴡᴀʀɴ ᴍʏ ᴍᴀɴᴀɢᴇʀ's, ʙᴇᴄᴀᴜsᴇ ʜᴇ ᴍᴀɴᴀɢᴇ ᴍᴇ!"
-        )
+        return await message.reply_text("ɪ ᴄᴀɴ'ᴛ ᴡᴀʀɴ ᴍʏ ᴍᴀɴᴀɢᴇʀ's, ʙᴇᴄᴀᴜsᴇ ʜᴇ ᴍᴀɴᴀɢᴇ ᴍᴇ!")
     if user_id in [
         member.user.id
         async for member in app.get_chat_members(
             chat_id=message.chat.id, filter=ChatMembersFilter.ADMINISTRATORS
         )
     ]:
-        return await message.reply_text(
-            "ɪ ᴄᴀɴ'ᴛ ᴡᴀʀɴ ᴀɴ ᴀᴅᴍɪɴ, ʏᴏᴜ ᴋɴᴏᴡ ᴛʜᴇ ʀᴜʟᴇs sᴏ ᴅᴏ ɪ."
-        )
+        return await message.reply_text("ɪ ᴄᴀɴ'ᴛ ᴡᴀʀɴ ᴀɴ ᴀᴅᴍɪɴ, ʏᴏᴜ ᴋɴᴏᴡ ᴛʜᴇ ʀᴜʟᴇs sᴏ ᴅᴏ ɪ.")
+    
     user, warns = await asyncio.gather(
         app.get_users(user_id),
         get_warn(chat_id, await int_to_alpha(user_id)),
@@ -688,11 +629,8 @@ async def remove_warning(_, cq: CallbackQuery):
     permissions = await member_permissions(chat_id, from_user.id)
     permission = "can_restrict_members"
     if permission not in permissions:
-        return await cq.answer(
-            "ʏᴏᴜ ᴅᴏɴ'ᴛ ʜᴀᴠᴇ ᴇɴᴏᴜɢʜ ᴘᴇʀᴍɪssɪᴏɴs ᴛᴏ ᴘᴇʀғᴏʀᴍ ᴛʜɪs ᴀᴄᴛɪᴏɴ\n"
-            + f"ᴘᴇʀᴍɪssɪᴏɴ ɴᴇᴇᴅᴇᴅ: {permission}",
-            show_alert=True,
-        )
+        return await cq.answer(f"ʏᴏᴜ ᴅᴏɴ'ᴛ ʜᴀᴠᴇ ᴇɴᴏᴜɢʜ ᴘᴇʀᴍɪssɪᴏɴs.\nᴘᴇʀᴍɪssɪᴏɴ ɴᴇᴇᴅᴇᴅ: {permission}", show_alert=True)
+    
     user_id = cq.data.split("_")[1]
     warns = await get_warn(chat_id, await int_to_alpha(user_id))
     if warns:
@@ -701,9 +639,7 @@ async def remove_warning(_, cq: CallbackQuery):
         return await cq.answer("ᴜsᴇʀ ʜᴀs ɴᴏ ᴡᴀʀɴɪɴɢs.")
     warn = {"warns": warns - 1}
     await add_warn(chat_id, await int_to_alpha(user_id), warn)
-    text = cq.message.text.markdown
-    text = f"~~{text}~~\n\n"
-    text += f"__ᴡᴀʀɴ ʀᴇᴍᴏᴠᴇᴅ ʙʏ {from_user.mention}__"
+    text = f"~~{cq.message.text.markdown}~~\n\n__ᴡᴀʀɴ ʀᴇᴍᴏᴠᴇᴅ ʙʏ {from_user.mention}__"
     await cq.message.edit(text)
 
 
@@ -740,119 +676,35 @@ async def check_warns(_, message: Message):
     return await message.reply_text(f"{mention} ʜᴀs {warns}/3 ᴡᴀʀɴɪɴɢs")
 
 
-from pyrogram import filters
-from VIPMUSIC import app
-from VIPMUSIC.misc import SUDOERS
-import asyncio
-from pyrogram.errors import FloodWait
-
-BOT_ID = app.id
-
-async def ban_members(chat_id, user_id, bot_permission, total_members, msg):
-    banned_count = 0
-    failed_count = 0
-    ok = await msg.reply_text(
-        f"Total members found: {total_members}\n**Started Banning..**"
-    )
-    
-    while failed_count <= 30:
-        async for member in app.get_chat_members(chat_id):
-            if failed_count > 30:
-                break  # Stop if failed bans exceed 30
-            
-            try:
-                if member.user.id != user_id and member.user.id not in SUDOERS:
-                    await app.ban_chat_member(chat_id, member.user.id)
-                    banned_count += 1
-
-                    if banned_count % 5 == 0:
-                        try:
-                            await ok.edit_text(
-                                f"Banned {banned_count} members out of {total_members}"
-                            )
-                        except Exception:
-                            pass  # Ignore if edit fails
-
-            except FloodWait as e:
-                await asyncio.sleep(e.x)  # Wait for the flood time and continue
-            except Exception:
-                failed_count += 1
-
-        if failed_count <= 30:
-            await asyncio.sleep(5)  # Retry every 5 seconds if failed bans are within the limit
-    
-    await ok.edit_text(
-        f"Total banned: {banned_count}\nFailed bans: {failed_count}\nStopped as failed bans exceeded limit."
-    )
-
-
-@app.on_message(filters.command("banall") & SUDOERS)
-async def ban_all(_, msg):
-    chat_id = msg.chat.id
-    user_id = msg.from_user.id  # ID of the user who issued the command
-    
-    bot = await app.get_chat_member(chat_id, BOT_ID)
-    bot_permission = bot.privileges.can_restrict_members
-    
-    if bot_permission:
-        total_members = 0
-        async for _ in app.get_chat_members(chat_id):
-            total_members += 1
-        
-        await ban_members(chat_id, user_id, bot_permission, total_members, msg)
-    
-    else:
-        await msg.reply_text(
-            "Either I don't have the right to restrict users or you are not in sudo users"
-        )
-
-
-
-from pyrogram import Client, filters
-from pyrogram.errors import UserNotParticipant, ChatAdminRequired, UserAlreadyParticipant, InviteHashExpired
-
-# Create a bot instance
-from VIPMUSIC import app 
-
 @app.on_message(filters.command("unbanme"))
 async def unbanme(client, message):
     try:
-        # Check if the command has a group ID argument
         if len(message.command) < 2:
             await message.reply_text("Please provide the group ID.")
             return
 
         group_id = message.command[1]
-
         try:
-            # Try to unban the user from the group
             await client.unban_chat_member(group_id, message.from_user.id)
-            
-            # Check if the user is already a participant in the group
             try:
                 member = await client.get_chat_member(group_id, message.from_user.id)
                 if member.status == "member":
-                    await message.reply_text(f"You are already unbanned in that group. You can join now by clicking here: {await get_group_link(client, group_id)}")
+                    link = await get_group_link(client, group_id)
+                    await message.reply_text(f"You are already unbanned. Join here: {link}")
                     return
-            except UserNotParticipant:
-                pass  # The user is not a participant, proceed to unban
+            except Exception:
+                pass
 
-            # Send unban success message
-            try:
-                group_link = await get_group_link(client, group_id)
-                await message.reply_text(f"I unbanned you in the group. You can join now by clicking here: {group_link}")
-            except InviteHashExpired:
-                await message.reply_text(f"I unbanned you in the group, but I couldn't provide a link to the group.")
-        except ChatAdminRequired:
-            await message.reply_text("I am not an admin in that group, so I cannot unban you.")
+            group_link = await get_group_link(client, group_id)
+            await message.reply_text(f"I unbanned you. Join here: {group_link}")
+        except Exception as e:
+            await message.reply_text(f"Error: {e}")
     except Exception as e:
         await message.reply_text(f"An error occurred: {e}")
 
 async def get_group_link(client, group_id):
-    # Try to get the group link or username
     chat = await client.get_chat(group_id)
     if chat.username:
         return f"https://t.me/{chat.username}"
     else:
-        invite_link = await client.export_chat_invite_link(group_id)
-        return invite_link
+        return await client.export_chat_invite_link(group_id)
