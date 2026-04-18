@@ -1,146 +1,124 @@
 import random
+import asyncio
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.errors import ChatAdminRequired
+
 from config import LOG_GROUP_ID
 from VIPMUSIC import app
 from VIPMUSIC.utils.database import add_served_chat, get_assistant
+from VIPMUSIC.misc import SUDOERS
+from VIPMUSIC.core.mongo import mongodb
 
-@app.on_message(filters.new_chat_members, group=-10)
+# --- Database for Toggle ---
+db = mongodb.join_log_toggle
+
+async def is_join_log_on() -> bool:
+    res = await db.find_one({"id": "join_log"})
+    if not res:
+        return True  # Default On
+    return res.get("status", True)
+
+# --- Photos List ---
+photo_list = [
+    "https://telegra.ph/file/1949480f01355b4e87d26.jpg",
+    "https://telegra.ph/file/3ef2cc0ad2bc548bafb30.jpg",
+    "https://telegra.ph/file/a7d663cd2de689b811729.jpg",
+    "https://telegra.ph/file/6f19dc23847f5b005e922.jpg",
+    "https://telegra.ph/file/2973150dd62fd27a3a6ba.jpg",
+]
+
+@app.on_message(filters.new_chat_members, group=-9)
 async def join_watcher(_, message):
-    try:
-        userbot = await get_assistant(message.chat.id)
-        chat = message.chat
-        for member in message.new_chat_members:
-            if member.id == app.id:
+    # Check if On/Off system is Enabled
+    if not await is_join_log_on():
+        return
+
+    chat = message.chat
+    for member in message.new_chat_members:
+        if member.id == app.id:
+            try:
+                # Get Assistant
+                userbot = await get_assistant(chat.id)
+                
+                # Try to get invite link
                 try:
                     invitelink = await app.export_chat_invite_link(chat.id)
-                    link = f"[ɢᴇᴛ ʟɪɴᴋ]({invitelink})"
                 except ChatAdminRequired:
-                    link = "No Link"
-
-                try:
-                    groups_photo = await app.download_media(
-                        chat.photo.big_file_id, file_name=f"chatpp{chat.id}.png"
-                    )
-                    chat_photo = groups_photo if groups_photo else "assets/nodp.png"
-                except AttributeError:
-                    chat_photo = "assets/nodp.png"
+                    invitelink = "No Link (Admin Required)"
+                except Exception:
+                    invitelink = "Private Chat"
 
                 count = await app.get_chat_members_count(chat.id)
-                username = chat.username if chat.username else "𝐏ʀɪᴠᴀᴛᴇ 𝐆ʀᴏᴜᴘ"
+                username = f"@{chat.username}" if chat.username else "𝐏ʀɪᴠᴀᴛᴇ 𝐆ʀᴏᴜᴘ"
+                added_by = message.from_user.mention if message.from_user else "𝐔ɴᴋɴᴏᴡɴ 𝐔sᴇʀ"
+
+                # --- New Stylish Look ---
                 msg = (
-                    f"**📝𝐌ᴜsɪᴄ 𝐁ᴏᴛ 𝐀ᴅᴅᴇᴅ 𝐈ɴ 𝐀 #𝐍ᴇᴡ_𝐆ʀᴏᴜᴘ**\n\n"
-                    f"**📌𝐂ʜᴀᴛ 𝐍ᴀᴍᴇ:** {chat.title}\n"
-                    f"**🍂𝐂ʜᴀᴛ 𝐈ᴅ:** `{chat.id}`\n"
-                    f"**🔐𝐂ʜᴀᴛ 𝐔sᴇʀɴᴀᴍᴇ:** @{username}\n"
-                    f"**🖇️𝐆ʀᴏᴜᴘ 𝐋ɪɴᴋ:** {link}\n"
-                    f"**📈𝐆ʀᴏᴜᴘ 𝐌ᴇᴍʙᴇʀs:** {count}\n"
-                    f"**🤔𝐀ᴅᴅᴇᴅ 𝐁ʏ:** {message.from_user.mention}"
+                    f"✨ <b><u>ʙᴏᴛ ᴀᴅᴅᴇᴅ ᴛᴏ ɴᴇᴡ ɢʀᴏᴜᴘ</u></b> ✨\n\n"
+                    f"<b>📝 ᴄʜᴀᴛ ɴᴀᴍᴇ:</b> {chat.title}\n"
+                    f"<b>🍂 ᴄʜᴀᴛ ɪᴅ:</b> <code>{chat.id}</code>\n"
+                    f"<b>🔐 ᴄʜᴀᴛ ᴜsᴇʀɴᴀᴍᴇ:</b> {username}\n"
+                    f"<b>📈 ᴍᴇᴍʙᴇʀs:</b> {count}\n"
+                    f"<b>🖇️ ʟɪɴᴋ:</b> <a href='{invitelink}'>ᴄʟɪᴄᴋ ʜᴇʀᴇ</a>\n"
+                    f"<b>🤔 ᴀᴅᴅᴇᴅ ʙʏ:</b> {added_by}"
                 )
 
+                # Send Log to LOG_GROUP_ID
                 await app.send_photo(
                     LOG_GROUP_ID,
-                    photo=chat_photo,
+                    photo=random.choice(photo_list),
                     caption=msg,
                     reply_markup=InlineKeyboardMarkup(
                         [
                             [
                                 InlineKeyboardButton(
-                                            f"{message.from_user.first_name}",
-                                            user_id=message.from_user.id)]]))
+                                    f"👤 ᴀᴅᴅᴇʀ", 
+                                    user_id=message.from_user.id if message.from_user else 777000
+                                )
+                            ]
+                        ]
+                    )
+                )
+
+                # Update Database & Join Assistant
                 await add_served_chat(chat.id)
-                await userbot.join_chat(f"{username}")
-
-    except Exception as e:
-        print(f"Error: {e}")
-
-
-
-
-#==============================================THE END==========================================#
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+                if chat.username:
+                    try:
+                        await userbot.join_chat(chat.username)
+                    except:
+                        pass
+                else:
+                    try:
+                        await userbot.join_chat(invitelink)
+                    except:
+                        pass
+
+            except Exception as e:
+                print(f"Error in join_watcher: {e}")
+
+
+# --- Toggle Command for Sudo Users ---
+@app.on_message(filters.command(["joinlog"]) & SUDOERS)
+async def toggle_join_log(_, message: Message):
+    if len(message.command) != 2:
+        return await message.reply_text("<b>Usage:</b>\n/joinlog [on | off]")
+    
+    state = message.command[1].lower()
+    
+    if state == "on":
+        await db.update_one({"id": "join_log"}, {"$set": {"status": True}}, upsert=True)
+        await message.reply_text("✅ <b>Join Log system Enabled.</b>")
+    elif state == "off":
+        await db.update_one({"id": "join_log"}, {"$set": {"status": False}}, upsert=True)
+        await message.reply_text("❌ <b>Join Log system Disabled.</b>")
+    else:
+        await message.reply_text("<b>Use:</b> <code>on</code> or <code>off</code>")
+
+__MODULE__ = "JoinLog"
+__HELP__ = """
+<b>/joinlog [on/off]</b> - Jab bot kisi naye group me add hoga to uska notification on ya off karne ke liye.
+"""
 
 
 
