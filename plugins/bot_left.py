@@ -28,7 +28,7 @@ photo = [
 async def is_leavelog_on() -> bool:
     res = await db.find_one({"id": "leavelog"})
     if not res:
-        return True  # Default On rahega
+        return True  # Default is On
     return res.get("status", True)
 
 async def leavelog_on():
@@ -48,7 +48,7 @@ async def on_left_chat_member(_, message: Message):
         userbot = await get_assistant(message.chat.id)
         left_chat_member = message.left_chat_member
         
-        # Agar Bot khud group se nikala jaye
+        # Check if the Bot itself is removed/left
         if left_chat_member and left_chat_member.id == (await app.get_me()).id:
             remove_by = (
                 message.from_user.mention if message.from_user else "𝐔ɴᴋɴᴏᴡɴ 𝐔sᴇʀ"
@@ -61,44 +61,44 @@ async def on_left_chat_member(_, message: Message):
             
             left = (
                 f"✫ <b><u>#𝐋ᴇғᴛ_𝐆ʀᴏᴜᴘ</u></b> ✫\n\n"
-                f"<b>𝐂ʜᴀᴛ 𝐓ɪᴛʟᴇ :</b> {title}\n\n"
-                f"<b>𝐂ʜᴀᴛ 𝐈ᴅ :</b> {chat_id}\n\n"
-                f"<b>𝐑ᴇᴍᴏᴠᴇᴅ 𝐁ʏ :</b> {remove_by}\n\n"
+                f"<b>𝐂ʜᴀᴛ 𝐓ɪᴛʟᴇ :</b> {title}\n"
+                f"<b>𝐂ʜᴀᴛ 𝐈ᴅ :</b> <code>{chat_id}</code>\n"
+                f"<b>𝐑ᴇᴍᴏᴠᴇᴅ 𝐁ʏ :</b> {remove_by}\n"
                 f"<b>𝐁ᴏᴛ :</b> @{app.username}"
             )
             
-            # Log Group me photo bhejna
+            # Send Photo to Log Group
             await app.send_photo(LOG_GROUP_ID, photo=random.choice(photo), caption=left)
             
-            # Database se chat remove karna
+            # Cleanup Database
             await delete_served_chat(chat_id)
             await VIP.st_stream(chat_id)
             await set_loop(chat_id, 0)
             
-            # Assistant ko group chhodne bolna
+            # Assistant leaves the group
             await userbot.leave_chat(chat_id)
             
     except Exception:
         pass
 
-# --- Command to Toggle On/Off ---
-@app.on_message(filters.command(["leavelog"]) & SUDOERS)
+# --- Command to Toggle On/Off (Sudoers/Owner Only) ---
+@app.on_message(filters.command(["leavelog", "botleft"]) & SUDOERS)
 async def toggle_leavelog(_, message: Message):
     if len(message.command) != 2:
-        return await message.reply_text("<b>Usage:</b>\n/leavelog [on | off]")
+        return await message.reply_text("<b>Usage:</b>\n/botleft [on | off]")
     
     state = message.command[1].lower()
     
     if state == "on":
         await leavelog_on()
-        await message.reply_text("✅ <b>Leave Log system has been enabled.</b>")
+        await message.reply_text("✅ <b>Bot Left logging system has been enabled.</b>")
     elif state == "off":
         await leavelog_off()
-        await message.reply_text("❌ <b>Leave Log system has been disabled.</b>")
+        await message.reply_text("❌ <b>Bot Left logging system has been disabled.</b>")
     else:
         await message.reply_text("<b>Invalid argument!</b> Use `on` or `off`.")
 
 __MODULE__ = "ʙᴏᴛ ʟᴇғᴛ"
 __HELP__ = """
-<b>/botleft [on/off]</b> - Bot jab group chhodega to uska log aur cleanup system enable ya disable karne ke liye. (Sudoers Only)
+<b>/botleft [on/off]</b> - Bot jab group chhodega to uska log aur cleanup system enable ya disable karne ke liye. (Sudoers/Owner Only)
 """
