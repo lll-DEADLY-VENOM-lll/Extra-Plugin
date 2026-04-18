@@ -13,7 +13,7 @@ from pymongo import MongoClient
 from VIPMUSIC import app
 from config import MONGO_DB_URI
 
-# --- Database --- #
+# --- Database Setup --- #
 welcomedb = MongoClient(MONGO_DB_URI)
 status_db = welcomedb.welcome_status_db.status
 
@@ -21,100 +21,109 @@ async def get_welcome_status(chat_id):
     status = status_db.find_one({"chat_id": chat_id})
     return status.get("welcome", "on") if status else "on"
 
-# --- Advanced Utils --- #
+# --- Robust API Fetcher (Multi-Source) --- #
 
-def clean_text(text):
-    """Stylish symbols ko remove karne ke liye taki font ❎ na dikhaye"""
-    return re.sub(r'[^\x00-\x7F]+', ' ', text).strip()
-
-async def get_anime_bg():
-    """High Resolution Anime Wallpapers API"""
-    url = "https://nekos.best/api/v2/wallpaper"
+async def get_anime_wallpaper():
+    """Fail-safe API: Agar ek fail ho to dusri chalegi"""
+    urls = [
+        "https://nekos.best/api/v2/wallpaper",
+        "https://waifu.pics/api/sfw/waifu",
+        "https://nekos.best/api/v2/waifu"
+    ]
+    random.shuffle(urls)
+    
     async with aiohttp.ClientSession() as session:
-        async with session.get(url) as resp:
-            data = await resp.json()
-            return data['results'][0]['url']
+        for url in urls:
+            try:
+                async with session.get(url, timeout=10) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        # Key check based on API source
+                        if 'results' in data:
+                            return data['results'][0]['url']
+                        elif 'url' in data:
+                            return data['url']
+            except:
+                continue
+    return "https://wallpaperaccess.com/full/1311152.jpg" # Super Fallback
 
 async def download_image(url):
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as resp:
             return Image.open(BytesIO(await resp.read())).convert("RGBA")
 
-# --- Pro Banner Engine --- #
+# --- Pro Image Engine --- #
 
-def create_banner(bg_img, pfp_img, u_id, u_name, u_user, count, c_title):
-    # 1. Canvas Dimensions (Cinema Style)
+def create_pro_banner(bg_img, pfp_img, u_id, u_name, u_user, count, c_title):
     W, H = 1200, 600
+    # Background processing
     bg = bg_img.resize((W, H), Image.Resampling.LANCZOS)
+    bg = bg.filter(ImageFilter.GaussianBlur(radius=1))
     
-    # 2. Modern Overlay (Side Gradient)
+    # Darken overlay
+    enhancer = ImageEnhance.Brightness(bg)
+    bg = enhancer.enhance(0.7)
+
+    # 1. Right Side Glass Panel
     overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw_ov = ImageDraw.Draw(overlay)
-    
-    # Futuristic Slanted Panel
-    draw_ov.polygon([(0, 0), (700, 0), (500, H), (0, H)], fill=(0, 0, 0, 200))
-    # Accent line
-    draw_ov.line([(700, 0), (500, H)], fill=(0, 255, 255, 255), width=8)
+    # Futuristic Slanted Box
+    draw_ov.polygon([(400, 0), (W, 0), (W, H), (300, H)], fill=(0, 0, 0, 180))
+    # Neon Glow Line
+    draw_ov.line([(400, 0), (300, H)], fill=(0, 255, 255, 255), width=5)
     
     bg = Image.alpha_composite(bg, overlay)
     draw = ImageDraw.Draw(bg)
 
-    # 3. User PFP (Circular with Double Stroke)
-    pfp = pfp_img.resize((300, 300), Image.Resampling.LANCZOS)
-    mask = Image.new("L", (300, 300), 0)
-    ImageDraw.Draw(mask).ellipse((0, 0, 300, 300), fill=255)
+    # 2. PFP Spotlight (Left Side)
+    pfp = pfp_img.resize((350, 350), Image.Resampling.LANCZOS)
+    mask = Image.new("L", (350, 350), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, 350, 350), fill=255)
     pfp.putalpha(mask)
     
-    # PFP Border Glow
-    draw.ellipse((45, 145, 355, 455), outline=(0, 255, 255, 255), width=10)
-    bg.paste(pfp, (50, 150), pfp)
+    # Outer Glow for PFP
+    draw.ellipse((40, 115, 410, 485), outline=(0, 255, 255, 150), width=15)
+    bg.paste(pfp, (50, 125), pfp)
 
-    # 4. Smart Font Loading (Fixes ❎ Boxes)
+    # 3. Smart Fonts (Unicode / Symbol Fix)
     def load_font(size):
-        # List of system fonts that support more characters
-        font_paths = [
-            "assets/font.ttf", 
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
-            "arial.ttf"
-        ]
-        for path in font_paths:
-            if os.path.exists(path):
-                return ImageFont.truetype(path, size)
+        # Multiple font paths for reliability
+        paths = ["assets/font.ttf", "assets/bold.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "arial.ttf"]
+        for p in paths:
+            if os.path.exists(p): return ImageFont.truetype(p, size)
         return ImageFont.load_default()
 
-    font_main = load_font(80)
-    font_sub = load_font(40)
-    font_info = load_font(30)
+    f_large = load_font(90)
+    f_name = load_font(60)
+    f_small = load_font(30)
 
-    # 5. Text Placement
-    u_name = clean_text(u_name) if u_name else "User"
-    c_title = clean_text(c_title)
-    
-    # "WELCOME" Text with Shadow
-    draw.text((433, 103), "WELCOME", font=font_main, fill=(0, 0, 0, 150)) # Shadow
-    draw.text((430, 100), "WELCOME", font=font_main, fill=(0, 255, 255))
-    
-    # Name
-    draw.text((430, 200), f"{u_name[:15].upper()}", font=font_sub, fill=(255, 255, 255))
-    
-    # Info Box (Modern Look)
-    draw.rectangle((430, 270, 900, 272), fill=(255, 255, 255, 100)) # Divider
-    
-    draw.text((430, 300), f"ID: {u_id}", font=font_info, fill=(200, 200, 200))
-    draw.text((430, 350), f"USER: @{u_user}", font=font_info, fill=(200, 200, 200))
-    
-    # Rank Badge (Bottom Left)
-    draw.rounded_rectangle((430, 420, 750, 490), radius=15, fill=(255, 0, 100, 200))
-    draw.text((455, 435), f"RANK #{count}", font=font_sub, fill=(255, 255, 255))
+    # Clean stylish names to avoid boxes ❎
+    clean_name = re.sub(r'[^\x00-\x7F]+', ' ', u_name).strip() or "User"
+    clean_title = re.sub(r'[^\x00-\x7F]+', ' ', c_title).strip() or "Server"
 
-    # Server Info
+    # 4. Content Placement
+    # Welcome Header
+    draw.text((480, 100), "WELCOME", font=f_large, fill=(0, 255, 255))
+    
+    # User Name (Pinkish/White Highlight)
+    draw.text((480, 210), clean_name[:15].upper(), font=f_name, fill=(255, 255, 255))
+    
+    # Info list
+    draw.line((480, 300, 1100, 300), fill=(255, 255, 255, 100), width=2)
+    draw.text((480, 330), f"🆔 ID: {u_id}", font=f_small, fill=(200, 200, 200))
+    draw.text((480, 380), f"🌐 USER: @{u_user}", font=f_small, fill=(200, 200, 200))
+    
+    # Rank Badge (Bottom Right)
+    draw.rounded_rectangle((480, 450, 850, 530), radius=20, fill=(255, 20, 147, 180))
+    draw.text((510, 465), f"RANKED #{count}", font=f_name, fill=(255, 255, 255))
+
+    # Server Info (Top Left)
     tz = pytz.timezone('Asia/Kolkata')
-    time_now = datetime.now(tz).strftime("%I:%M %p")
-    draw.text((50, 40), f"📍 {c_title[:25]}", font=font_info, fill=(255, 255, 255))
-    draw.text((1050, 40), time_now, font=font_info, fill=(0, 255, 255))
+    time_str = datetime.now(tz).strftime("%I:%M %p")
+    draw.text((50, 40), f"📍 {clean_title[:25]}", font=f_small, fill=(255, 255, 255, 180))
+    draw.text((1050, 40), time_str, font=f_small, fill=(0, 255, 255))
 
-    path = f"downloads/banner_{u_id}.png"
+    path = f"downloads/card_{u_id}.png"
     bg.save(path)
     return path
 
@@ -133,8 +142,8 @@ async def member_join_handler(_, member: ChatMemberUpdated):
     count = await app.get_chat_members_count(chat_id)
 
     try:
-        # Automatic Anime Wallpaper Fetch
-        bg_url = await get_anime_bg()
+        # Automatic Multi-API Image Fetch
+        bg_url = await get_anime_wallpaper()
         bg_img = await download_image(bg_url)
         
         # User PFP
@@ -142,14 +151,14 @@ async def member_join_handler(_, member: ChatMemberUpdated):
             pfp_path = await app.download_media(user.photo.big_file_id)
             pfp_img = Image.open(pfp_path)
         else:
-            pfp_img = Image.new("RGBA", (300, 300), (20, 20, 40))
+            pfp_img = Image.new("RGBA", (350, 350), (20, 20, 40))
             pfp_path = None
 
         u_username = user.username if user.username else "No_Username"
 
-        # Generate Masterpiece
+        # Generate Poster
         loop = asyncio.get_running_loop()
-        card = await loop.run_in_executor(None, create_banner, bg_img, pfp_img, user.id, user.first_name, u_username, count, member.chat.title)
+        card = await loop.run_in_executor(None, create_pro_banner, bg_img, pfp_img, user.id, user.first_name, u_username, count, member.chat.title)
 
         caption = (
             f"<b>🎌 ɴᴇᴡ ɴᴀᴋᴀᴍᴀ ᴀʀʀɪᴠᴇᴅ 🎌</b>\n\n"
@@ -172,4 +181,4 @@ async def member_join_handler(_, member: ChatMemberUpdated):
     except Exception as e:
         print(f"Error: {e}")
 
-# ... (Command /wem remains same)
+# ... (Command /wem code)
