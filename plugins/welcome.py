@@ -1,6 +1,5 @@
 import asyncio
 import os
-import re
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from pyrogram import enums, filters
 from pyrogram.types import ChatMemberUpdated, InlineKeyboardButton, InlineKeyboardMarkup
@@ -21,72 +20,56 @@ async def set_welcome_status(chat_id, state):
 
 # --- Premium Image Logic --- #
 
-def make_round(pfp, size=(240, 240)):
+def make_round(pfp, size=(250, 250)):
     pfp = pfp.resize(size, Image.Resampling.LANCZOS).convert("RGBA")
     mask = Image.new("L", size, 0)
     draw = ImageDraw.Draw(mask)
     draw.ellipse((0, 0) + size, fill=255)
     pfp.putalpha(mask)
     
-    canvas = Image.new("RGBA", (size[0]+12, size[1]+12), (0, 0, 0, 0))
+    canvas = Image.new("RGBA", (size[0]+16, size[1]+16), (0, 0, 0, 0))
     draw_can = ImageDraw.Draw(canvas)
-    draw_can.ellipse((0, 0, size[0]+12, size[1]+12), outline=(0, 255, 255, 200), width=6)
-    canvas.paste(pfp, (6, 6), pfp)
+    draw_can.ellipse((0, 0, size[0]+16, size[1]+16), outline=(255, 255, 255, 255), width=8)
+    canvas.paste(pfp, (8, 8), pfp)
     return canvas
 
 def create_welcome_card(u_id, u_first, u_username, c_name, u_pfp, c_pfp):
     try:
-        # Load Background
         bg_path = "assets/wel2.png"
         if os.path.exists(bg_path):
             bg = Image.open(bg_path).convert("RGBA").resize((1200, 600))
         else:
-            # अगर इमेज नहीं है तो डार्क बैकग्राउंड ताकि सफेद टेक्स्ट दिखे
-            bg = Image.new("RGBA", (1200, 600), (15, 15, 25))
+            bg = Image.new("RGBA", (1200, 600), (10, 10, 15))
 
-        # Photo Processing
-        user_img = make_round(Image.open(u_pfp), (225, 225))
-        chat_img = make_round(Image.open(c_pfp), (225, 225))
+        user_img = make_round(Image.open(u_pfp), (240, 240))
+        chat_img = make_round(Image.open(c_pfp), (180, 180))
 
-        # Paste Photos
-        bg.paste(chat_img, (135, 160), chat_img) 
-        bg.paste(user_img, (840, 160), user_img) 
+        bg.paste(chat_img, (60, 60), chat_img) 
+        bg.paste(user_img, (480, 80), user_img) 
 
-        # Bottom Panel
         overlay = Image.new("RGBA", (1200, 600), (0, 0, 0, 0))
         draw_ov = ImageDraw.Draw(overlay)
-        draw_ov.rounded_rectangle((360, 440, 840, 560), radius=25, fill=(0, 0, 0, 180))
+        draw_ov.rounded_rectangle((100, 380, 1100, 560), radius=30, fill=(0, 0, 0, 160))
         bg = Image.alpha_composite(bg, overlay)
 
-        # Typography
         try:
-            f_title = ImageFont.truetype("assets/font.ttf", 50)
-            f_group = ImageFont.truetype("assets/font.ttf", 55)
-            f_info = ImageFont.truetype("assets/font.ttf", 30)
+            f_main = ImageFont.truetype("assets/font.ttf", 65)
+            f_sub = ImageFont.truetype("assets/font.ttf", 40)
+            f_id = ImageFont.truetype("assets/font.ttf", 30)
         except:
-            f_title = f_group = f_info = ImageFont.load_default()
+            f_main = f_sub = f_id = ImageFont.load_default()
 
         draw = ImageDraw.Draw(bg)
-
-        # 1. "WELCOME TO" (रंग Cyan रखा है ताकि सफेद पर भी दिखे)
-        draw.text((600, 100), "WELCOME TO", font=f_title, fill=(0, 255, 255), anchor="mm")
-        
-        # 2. GROUP NAME (Regex हटा दिया ताकि पूरा नाम आए)
-        # सिर्फ इमोजी हटाने के लिए हल्का फिल्टर
-        clean_c_name = c_name[:20] if c_name else "GROUP"
-        draw.text((600, 180), f"{clean_c_name.upper()}", font=f_group, fill=(255, 255, 255), anchor="mm")
-
-        # 3. USER DETAILS
-        clean_u_name = u_first[:15] if u_first else "User"
-        draw.text((390, 455), f"NAME: {clean_u_name}", font=f_info, fill=(255, 255, 255))
-        draw.text((390, 488), f"ID: {u_id}", font=f_info, fill=(0, 255, 255))
-        draw.text((390, 521), f"USER: {u_username[:15]}", font=f_info, fill=(255, 255, 255))
+        welcome_text = f"WELCOME TO {c_name[:20].upper()}"
+        draw.text((600, 420), welcome_text, font=f_sub, fill=(0, 220, 255), anchor="mm")
+        draw.text((600, 480), f"{u_first[:15]}", font=f_main, fill=(255, 255, 255), anchor="mm")
+        draw.text((600, 530), f"ID: {u_id}  |  USER: {u_username[:20]}", font=f_id, fill=(200, 200, 200), anchor="mm")
 
         out = f"downloads/w_{u_id}.png"
         bg.save(out)
         return out
     except Exception as e:
-        print(f"Error in create_welcome_card: {e}")
+        print(f"Error: {e}")
         return None
 
 # --- Pyrogram Handlers --- #
@@ -96,31 +79,30 @@ async def member_join_handler(_, member: ChatMemberUpdated):
     if not (member.new_chat_member and not member.old_chat_member):
         return
     
-    if await get_welcome_status(member.chat.id) == "off":
+    chat_id = member.chat.id
+    if await get_welcome_status(chat_id) == "off":
         return
 
     user = member.new_chat_member.user
     u_username = f"@{user.username}" if user.username else "No Username"
     
     u_p = await app.download_media(user.photo.big_file_id, f"u{user.id}.png") if user.photo else "assets/nodp.png"
-    c_p = await app.download_media(member.chat.photo.big_file_id, f"c{member.chat.id}.png") if member.chat.photo else "assets/nodp.png"
+    c_p = await app.download_media(member.chat.photo.big_file_id, f"c{chat_id}.png") if member.chat.photo else "assets/nodp.png"
 
     loop = asyncio.get_running_loop()
     card = await loop.run_in_executor(None, create_welcome_card, user.id, user.first_name, u_username, member.chat.title, u_p, c_p)
 
     if card:
         caption = (
-            f"◦•●◉✿ ᴡᴇʟᴄᴏᴍᴇ ʙᴀʙʏ ✿◉●•◦\n"
-            f"▰▱▱▱▱▱▱▱▱▱▱▱▱▱▰\n\n"
-            f"● ɴᴀᴍᴇ ➥ {user.mention}\n"
-            f"● ᴜsᴇʀɴᴀᴍᴇ ➥ {u_username}\n"
-            f"● ᴜsᴇʀ ɪᴅ ➥ <code>{user.id}</code>\n\n"
-            f"❖ ᴘᴏᴡᴇʀᴇᴅ ʙʏ ➥ <a href='https://t.me/{app.username}'>{app.name}</a>\n"
-            f"▰▱▱▱▱▱▱▱▱▱▱▱▱▱▰"
+            f"<b>🎉 ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ ᴏᴜʀ ᴄʜᴀᴛ!</b>\n\n"
+            f"<b>👤 ɴᴀᴍᴇ :</b> {user.mention}\n"
+            f"<b>🆔 ɪᴅ :</b> <code>{user.id}</code>\n"
+            f"<b>🔗 ᴜsᴇʀɴᴀᴍᴇ :</b> {u_username}\n\n"
+            f"✨ <i>ʜᴀᴠᴇ ᴀ ɢʀᴇᴀᴛ ᴛɪᴍᴇ ʜᴇʀᴇ!</i>"
         )
         
         await app.send_photo(
-            member.chat.id, 
+            chat_id, 
             photo=card, 
             caption=caption,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("➕ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘ", url=f"https://t.me/{app.username}?startgroup=true")]])
@@ -130,14 +112,33 @@ async def member_join_handler(_, member: ChatMemberUpdated):
             if f and os.path.exists(f) and "assets/" not in f:
                 os.remove(f)
 
-@app.on_message(filters.command("welcome") & ~filters.private)
+# --- Updated Command: /wem --- #
+
+@app.on_message(filters.command("wem") & ~filters.private)
 async def welcome_toggle(_, m):
-    user = await app.get_chat_member(m.chat.id, m.from_user.id)
-    if user.status not in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
+    try:
+        user = await app.get_chat_member(m.chat.id, m.from_user.id)
+        if user.status not in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
+            return await m.reply_text("❌ You don't have permission to use this command.")
+    except:
         return
-    if len(m.command) < 2: return
+
+    if len(m.command) < 2:
+        return await m.reply_text("<b>Usage:</b>\n`/wem on` - Enable Welcome\n`/wem off` - Disable Welcome")
+    
     state = m.command[1].lower()
-    await set_welcome_status(m.chat.id, state)
-    await m.reply_text(f"✅ Welcome {state.upper()}")
+    if state in ["on", "enable", "yes"]:
+        await set_welcome_status(m.chat.id, "on")
+        await m.reply_text("✅ <b>Welcome message has been enabled!</b>")
+    elif state in ["off", "disable", "no"]:
+        await set_welcome_status(m.chat.id, "off")
+        await m.reply_text("🔕 <b>Welcome message has been disabled!</b>")
+    else:
+        await m.reply_text("❌ Invalid argument. Use `on` or `off`.")
 
 __MODULE__ = "Welcome"
+__HELP__ = """
+/wem [on/off] - Enable or Disable the premium welcome card in your group.
+
+**Note:** Bot must be an Admin to work properly.
+"""
