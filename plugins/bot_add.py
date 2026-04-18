@@ -1,7 +1,7 @@
 import random
 import asyncio
 from pyrogram import filters
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from pyrogram.errors import ChatAdminRequired
 
 from config import LOG_GROUP_ID
@@ -61,7 +61,7 @@ async def join_watcher(_, message):
                     f"<b>🔐 ᴄʜᴀᴛ ᴜsᴇʀɴᴀᴍᴇ:</b> {username}\n"
                     f"<b>📈 ᴍᴇᴍʙᴇʀs:</b> {count}\n"
                     f"<b>🖇️ ʟɪɴᴋ:</b> <a href='{invitelink}'>ᴄʟɪᴄᴋ ʜᴇʀᴇ</a>\n"
-                    f"<b>🤔 ᴀᴅᴅᴇᴅ ʙʏ:</b> {added_by}"
+                    f"<b>🤔 ᴀᴅᴅᴇʀ ʙʏ:</b> {added_by}"
                 )
 
                 # Send Log to LOG_GROUP_ID
@@ -119,31 +119,6 @@ __MODULE__ = "JoinLog"
 __HELP__ = """
 <b>/joinlog [on/off]</b> - Jab bot kisi naye group me add hoga to uska notification on ya off karne ke liye.
 """
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
