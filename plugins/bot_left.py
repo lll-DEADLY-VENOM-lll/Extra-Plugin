@@ -98,7 +98,7 @@ async def toggle_leavelog(_, message: Message):
     else:
         await message.reply_text("<b>Invalid argument!</b> Use `on` or `off`.")
 
-__MODULE__ = "LeaveLog"
+__MODULE__ = "ʙᴏᴛ ʟᴇғᴛ"
 __HELP__ = """
-<b>/leavelog [on/off]</b> - Bot jab group chhodega to uska log aur cleanup system enable ya disable karne ke liye. (Sudoers Only)
+<b>/botleft [on/off]</b> - Bot jab group chhodega to uska log aur cleanup system enable ya disable karne ke liye. (Sudoers Only)
 """
