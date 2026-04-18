@@ -11,7 +11,7 @@ from VIPMUSIC.utils.database import get_served_chats
 AUTO_GCASTS = AUTO_GCAST.strip().lower() == "on"
 
 # Image and Messages
-START_IMG_URLS = "https://graph.org/file/ab5d1f1f85375b0659453-2d327a8addd08623ac.jpg"
+START_IMG_URLS = "https://i.ibb.co/Pz4Vcqf5/x.jpg"
 
 MESSAGE = f"""**๏ ᴛʜɪs ɪs ᴀᴅᴠᴀɴᴄᴇᴅ ᴍᴜsɪᴄ ᴘʟᴀʏᴇʀ ʙᴏᴛ ғᴏʀ ᴛᴇʟᴇɢʀᴀᴍ ɢʀᴏᴜᴘs + ᴄʜᴀɴɴᴇʟs ᴠᴄ. 💌
 
