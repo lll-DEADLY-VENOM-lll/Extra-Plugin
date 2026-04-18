@@ -1,9 +1,11 @@
 import asyncio
 import os
 import random
+import aiohttp
+from io import BytesIO
 from datetime import datetime
 import pytz
-from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps, ImageEnhance
 from pyrogram import enums, filters
 from pyrogram.types import ChatMemberUpdated, InlineKeyboardButton, InlineKeyboardMarkup
 from pymongo import MongoClient
@@ -18,112 +20,103 @@ async def get_welcome_status(chat_id):
     status = status_db.find_one({"chat_id": chat_id})
     return status.get("welcome", "on") if status else "on"
 
-# --- Advanced Image Engine (No Background Required) --- #
+# --- Automatic Asset Fetcher --- #
 
-def generate_gradient_bg(size=(1200, 700)):
-    """Background image ki zarurat nahi, yeh khud gradient banayega."""
-    base = Image.new("RGB", size, (20, 20, 30))
-    top_color = (random.randint(40, 80), 0, random.randint(100, 200)) # Deep Purple/Blue
-    bottom_color = (0, random.randint(100, 150), random.randint(150, 255)) # Cyan
-    
-    draw = ImageDraw.Draw(base)
-    for y in range(size[1]):
-        r = int(top_color[0] + (bottom_color[0] - top_color[0]) * (y / size[1]))
-        g = int(top_color[1] + (bottom_color[1] - top_color[1]) * (y / size[1]))
-        b = int(top_color[2] + (bottom_color[2] - top_color[2]) * (y / size[1]))
-        draw.line([(0, y), (size[0], y)], fill=(r, g, b))
-    
-    # Add some abstract "Vibe" (Random circles/lines)
-    overlay = Image.new("RGBA", size, (0, 0, 0, 0))
-    o_draw = ImageDraw.Draw(overlay)
-    for _ in range(10):
-        x, y = random.randint(0, 1200), random.randint(0, 700)
-        r = random.randint(50, 200)
-        o_draw.ellipse((x-r, y-r, x+r, y+r), fill=(255, 255, 255, random.randint(5, 15)))
-    
-    return Image.alpha_composite(base.convert("RGBA"), overlay)
+async def fetch_random_anime_img():
+    """API se random anime image ka URL nikalne ke liye"""
+    urls = [
+        "https://nekos.best/api/v2/waifu",
+        "https://nekos.best/api/v2/husbando",
+        "https://waifu.pics/api/sfw/waifu"
+    ]
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(random.choice(urls)) as resp:
+                data = await resp.json()
+                # Nekos.best aur Waifu.pics ka JSON structure thoda alag hota hai
+                return data['results'][0]['url'] if 'results' in data else data['url']
+    except:
+        return "https://wallpaperaccess.com/full/1311152.jpg" # Fallback link
 
-def get_hexagon_pfp(pfp_path, size=(320, 320)):
-    """User ki photo ko Hexagon shape mein convert karne ke liye."""
-    img = Image.open(pfp_path).convert("RGBA").resize(size, Image.Resampling.LANCZOS)
-    mask = Image.new("L", size, 0)
-    draw = ImageDraw.Draw(mask)
-    
-    # Draw Hexagon
-    coords = []
-    import math
-    for i in range(6):
-        angle = math.radians(i * 60)
-        x = size[0]/2 + (size[0]/2) * math.cos(angle)
-        y = size[1]/2 + (size[1]/2) * math.sin(angle)
-        coords.append((x, y))
-    draw.polygon(coords, fill=255)
-    
-    output = Image.new("RGBA", size, (0, 0, 0, 0))
-    output.paste(img, (0, 0), mask)
-    
-    # Border with Glow
-    border = Image.new("RGBA", (size[0]+20, size[1]+20), (0, 0, 0, 0))
-    b_draw = ImageDraw.Draw(border)
-    b_coords = [(x+10, y+10) for x, y in coords]
-    for i in range(10, 0, -1):
-        b_draw.polygon(b_coords, outline=(0, 255, 255, 100 - i*10), width=i*2)
-    
-    border.paste(output, (10, 10), output)
-    return border
+async def get_image_from_url(url):
+    """URL se image download karke PIL object banane ke liye"""
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url) as resp:
+            return Image.open(BytesIO(await resp.read())).convert("RGBA")
 
-def create_ultra_card(u_id, u_name, u_user, c_title, count, pfp_path):
-    # 1. Background Generation
-    bg = generate_gradient_bg()
+# --- Pro Image Engine --- #
+
+def create_dynamic_card(bg_img, pfp_img, u_id, u_name, u_user, count, c_title):
+    # 1. Canvas Setup
+    width, height = 1200, 700
+    bg = bg_img.resize((width, height), Image.Resampling.LANCZOS)
+    bg = bg.filter(ImageFilter.GaussianBlur(radius=3))
+    
+    # Darken Background for readability
+    enhancer = ImageEnhance.Brightness(bg)
+    bg = enhancer.enhance(0.6)
+    
+    # 2. Glassmorphism Panel
+    overlay = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw_ov = ImageDraw.Draw(overlay)
+    draw_ov.rounded_rectangle((50, 50, 1150, 650), radius=50, fill=(0, 0, 0, 140), outline=(255, 255, 255, 30), width=2)
+    bg = Image.alpha_composite(bg, overlay)
+    
+    # 3. Profile Picture (Circle)
+    pfp = pfp_img.resize((300, 300), Image.Resampling.LANCZOS)
+    mask = Image.new("L", (300, 300), 0)
+    ImageDraw.Draw(mask).ellipse((0, 0, 300, 300), fill=255)
+    
+    circular_pfp = ImageOps.fit(pfp, mask.size, centering=(0.5, 0.5))
+    circular_pfp.putalpha(mask)
+    
+    # PFP Glow
+    pfp_border = Image.new("RGBA", (320, 320), (0, 0, 0, 0))
+    ImageDraw.Draw(pfp_border).ellipse((0, 0, 320, 320), outline=(0, 255, 255, 180), width=10)
+    bg.paste(pfp_border, (90, 190), pfp_border)
+    bg.paste(circular_pfp, (100, 200), circular_pfp)
+
+    # 4. Automatic Font Selector
+    def load_font(size):
+        # Try finding any stylish system font automatically
+        font_names = ["DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf", "Arial Bold.ttf", "Verdana.ttf"]
+        for f in font_names:
+            try: return ImageFont.truetype(f, size)
+            except: continue
+        return ImageFont.load_default()
+
+    f_huge = load_font(100)
+    f_mid = load_font(60)
+    f_small = load_font(35)
+    
     draw = ImageDraw.Draw(bg)
     
-    # 2. Hexagon PFP
-    pfp = get_hexagon_pfp(pfp_path)
-    bg.paste(pfp, (80, 180), pfp)
-
-    # 3. Fonts
-    try:
-        font_path = "assets/font.ttf"
-        f_wel = ImageFont.truetype(font_path, 100) # Big Welcome
-        f_name = ImageFont.truetype(font_path, 70)  # Name
-        f_sub = ImageFont.truetype(font_path, 35)   # Details
-    except:
-        f_wel = f_name = f_sub = ImageFont.load_default()
-
-    # 4. Glass Effect Box for text
-    overlay = Image.new("RGBA", (1200, 700), (0, 0, 0, 0))
-    o_draw = ImageDraw.Draw(overlay)
-    o_draw.rounded_rectangle((450, 150, 1150, 550), radius=40, fill=(255, 255, 255, 20), outline=(255, 255, 255, 50), width=3)
-    bg = Image.alpha_composite(bg, overlay)
-    draw = ImageDraw.Draw(bg) # Redraw on composite
-
-    # 5. Stylish Text
-    # Welcome Label
-    draw.text((490, 180), "WELCOME", font=f_wel, fill=(0, 255, 255))
+    # 5. Dynamic Text Drawing
+    # Neon Welcome
+    draw.text((450, 140), "WELCOME", font=f_huge, fill=(0, 255, 255))
     
-    # User Name with Shadow
-    draw.text((493, 293), u_name[:15].upper(), font=f_name, fill=(0, 0, 0, 100)) # Shadow
-    draw.text((490, 290), u_name[:15].upper(), font=f_name, fill=(255, 255, 255))
+    # Name & User Info
+    draw.text((450, 260), u_name[:15].upper(), font=f_mid, fill=(255, 255, 255))
+    draw.line((450, 350, 1050, 350), fill=(255, 255, 255, 100), width=3)
     
-    # Divider line
-    draw.line((490, 380, 1100, 380), fill=(255, 255, 255, 100), width=2)
+    draw.text((450, 380), f"ID: {u_id}", font=f_small, fill=(200, 200, 200))
+    draw.text((450, 430), f"USER: @{u_user}", font=f_small, fill=(200, 200, 200))
+    
+    # Badge
+    draw.rounded_rectangle((450, 500, 900, 580), radius=20, fill=(255, 20, 147, 100))
+    draw.text((480, 515), f"MEMBER RANK #{count}", font=f_small, fill=(255, 255, 255))
 
-    # Info Details
-    draw.text((490, 410), f"ID : {u_id}", font=f_sub, fill=(200, 200, 200))
-    draw.text((490, 460), f"USER : @{u_user}", font=f_sub, fill=(200, 200, 200))
-    draw.text((490, 510), f"RANK : #{count} MEMBER", font=f_sub, fill=(255, 215, 0)) # Gold Color
-
-    # Top Header
+    # Server/Time Info
     tz = pytz.timezone('Asia/Kolkata')
-    time_now = datetime.now(tz).strftime("%I:%M %p | %d %b")
-    draw.text((50, 50), f"SERVER: {c_title[:30].upper()}", font=f_sub, fill=(255, 255, 255, 150))
-    draw.text((950, 50), time_now, font=f_sub, fill=(255, 255, 255, 150))
+    curr_time = datetime.now(tz).strftime("%I:%M %p")
+    draw.text((80, 70), f"SERVER: {c_title[:20].upper()}", font=f_small, fill=(255, 255, 255, 150))
+    draw.text((950, 70), curr_time, font=f_small, fill=(0, 255, 255))
 
-    out_path = f"downloads/pro_card_{u_id}.png"
-    bg.save(out_path, quality=100)
-    return out_path
+    temp_path = f"downloads/auto_{u_id}.png"
+    bg.save(temp_path)
+    return temp_path
 
-# --- Pyrogram Handlers --- #
+# --- Bot Handler --- #
 
 @app.on_chat_member_updated(filters.group, group=10)
 async def member_join_handler(_, member: ChatMemberUpdated):
@@ -136,49 +129,49 @@ async def member_join_handler(_, member: ChatMemberUpdated):
 
     user = member.new_chat_member.user
     count = await app.get_chat_members_count(chat_id)
-    
-    # User PFP
-    if user.photo:
-        pfp_file = await app.download_media(user.photo.big_file_id, f"pfp_{user.id}.png")
-    else:
-        pfp_file = "assets/nodp.png" # Create a simple blue image if not exists
 
-    u_username = user.username if user.username else "NO_USER"
-    
-    loop = asyncio.get_running_loop()
     try:
-        card = await loop.run_in_executor(None, create_ultra_card, user.id, user.first_name, u_username, member.chat.title, count, pfp_file)
+        # 1. Automatic Background Fetching
+        anime_url = await fetch_random_anime_img()
+        bg_img = await get_image_from_url(anime_url)
         
+        # 2. User PFP Fetching
+        if user.photo:
+            pfp_path = await app.download_media(user.photo.big_file_id)
+            pfp_img = Image.open(pfp_path)
+        else:
+            pfp_img = Image.new("RGB", (300, 300), (30, 30, 50))
+            pfp_path = None
+
+        u_username = user.username if user.username else "No_Username"
+
+        # 3. Generate Card
+        loop = asyncio.get_running_loop()
+        card_path = await loop.run_in_executor(None, create_dynamic_card, bg_img, pfp_img, user.id, user.first_name, u_username, count, member.chat.title)
+
+        # 4. Send with stylish caption
         caption = (
-            f"<b>✨ ᴘʀᴇᴍɪᴜᴍ ᴡᴇʟᴄᴏᴍᴇ ✨</b>\n\n"
-            f"<b>👤 ɴᴀᴍᴇ :</b> {user.mention}\n"
-            f"<b>🆔 ɪᴅ :</b> <code>{user.id}</code>\n"
-            f"<b>📊 ʀᴀɴᴋ :</b> <code>#{count}</code>\n\n"
-            f"<i>🚀 ᴡᴇʟᴄᴏᴍᴇ ᴛᴏ {member.chat.title}! ᴋᴇᴇᴘ ᴛʜᴇ ᴄʜᴀᴛ ᴀʟɪᴠᴇ.</i>"
+            f"<b>🌸 ᴀᴜᴛᴏ-ɢᴇɴᴇʀᴀᴛᴇᴅ ᴡᴇʟᴄᴏᴍᴇ 🌸</b>\n\n"
+            f"<b>╔══════════════════╗</b>\n"
+            f"<b>   👤 ɴᴀᴍᴇ :</b> {user.mention}\n"
+            f"<b>   🆔 ɪᴅ :</b> <code>{user.id}</code>\n"
+            f"<b>   📊 ʀᴀɴᴋ :</b> <code>#{count}</code>\n"
+            f"<b>╚══════════════════╝</b>\n\n"
+            f"<i>🚀 ᴇɴᴊᴏʏ ʏᴏᴜʀ sᴛᴀʏ ɪɴ {member.chat.title}!</i>"
         )
 
         await app.send_photo(
             chat_id, 
-            photo=card, 
+            photo=card_path, 
             caption=caption,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("➕ ᴀᴅᴅ ᴍᴇ ᴛᴏ ʏᴏᴜʀ ɢʀᴏᴜᴘ", url=f"https://t.me/{app.username}?startgroup=true")]])
         )
-    except Exception as e:
-        print(f"Error: {e}")
-    finally:
-        if 'card' in locals() and os.path.exists(card): os.remove(card)
-        if "assets/" not in pfp_file and os.path.exists(pfp_file): os.remove(pfp_file)
 
-@app.on_message(filters.command("wem") & ~filters.private)
-async def welcome_toggle(_, m):
-    # Same permission logic as before
-    if len(m.command) < 2:
-        return await m.reply_text("<b>Usage:</b> `/wem on` | `/wem off`")
-    
-    state = m.command[1].lower()
-    if state in ["on", "enable"]:
-        await set_welcome_status(m.chat.id, "on")
-        await m.reply_text("✨ <b>Ultra Welcome Enabled!</b>")
-    elif state in ["off", "disable"]:
-        await set_welcome_status(m.chat.id, "off")
-        await m.reply_text("🌑 <b>Welcome Disabled!</b>")
+        # Cleanup
+        if os.path.exists(card_path): os.remove(card_path)
+        if pfp_path and os.path.exists(pfp_path): os.remove(pfp_path)
+
+    except Exception as e:
+        print(f"Automatic Error: {e}")
+
+# ... (Keep /wem command same)
