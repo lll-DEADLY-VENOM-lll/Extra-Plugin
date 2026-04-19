@@ -5,10 +5,9 @@ import time
 from pyrogram import filters
 from pyrogram.types import Message
 from github import Github
-from github.GithubException import GithubException
 from motor.motor_asyncio import AsyncIOMotorClient
 
-# --- CONFIG & APP IMPORTS ---
+# --- DATABASE & APP CONFIG ---
 try:
     try:
         from config import MONGO_DB_URI as MONGO_DB_URL
@@ -19,26 +18,28 @@ except ImportError:
 
 from VIPMUSIC import app 
 
-# --- DATABASE SETUP ---
 if MONGO_DB_URL:
     mongo_client = AsyncIOMotorClient(MONGO_DB_URL)
     db = mongo_client["GitHubPublicBot"]
     tokens_col = db["user_tokens"]
 
-# --- BEAUTIFIED HELP GUIDE ---
+# --- HELP GUIDE ---
 HELP_TEXT = """
-🧠 **GITHUB UPLOADER BOT — 404 FIXED**
+🚀 **GITHUB REPO UPGRADER BOT**
 ━━━━━━━━━━━━━━━━━━━━━━
-🚀 **Auto-Create Repo feature is now active.**
+This bot allows you to upload and refactor repositories (Change imports/folder names automatically).
 
-🔐 **COMMANDS:**
-๏ `/settoken <token>` : Save your Token.
-๏ `/deltoken` : Delete your Token.
-๏ **Generate Token:** [Click Here](https://github.com/settings/tokens)
+🔐 **SETUP:**
+๏ `/settoken <token>` : Save your GitHub Personal Access Token.
+๏ `/deltoken` : Delete your saved token.
 
-📤 **UPLOADING:**
-๏ `/upload <repo>` : Upload to ROOT. 
-   *(If repo doesn't exist, I will create it!)*
+📤 **COMMANDS:**
+๏ `/upload_repo <repo_name> <old_string> <new_string>`
+๏ `/upgrade_repo <repo_name> <old_string> <new_string>`
+
+**Example:** 
+`/upload_repo MyNewBot VIPMUSIC ALEX_MUSIC`
+*(This will replace all 'VIPMUSIC' imports and folders with 'ALEX_MUSIC' before uploading)*
 ━━━━━━━━━━━━━━━━━━━━━━
 """
 
@@ -49,119 +50,129 @@ async def get_token(user_id):
 
 @app.on_message(filters.command(["start", "help"]))
 async def help_handler(_, message: Message):
-    await message.reply_text(HELP_TEXT, disable_web_page_preview=True)
+    await message.reply_text(HELP_TEXT)
 
-@app.on_message(filters.command("settoken"))
-async def set_token_cmd(_, message: Message):
-    if len(message.command) < 2: return
-    await tokens_col.update_one({"user_id": message.from_user.id}, {"$set": {"token": message.command[1]}}, upsert=True)
-    await message.reply_text("✅ Token saved!")
-
-@app.on_message(filters.command("deltoken"))
-async def del_token_cmd(_, message: Message):
-    await tokens_col.delete_one({"user_id": message.from_user.id})
-    await message.reply_text("🗑️ Token removed.")
-
-# --- CORE UPLOAD LOGIC (WITH AUTO-CREATE REPO FIX) ---
-
-@app.on_message(filters.command("upload"))
-async def github_upload(_, message: Message):
+@app.on_message(filters.command(["upload_repo", "upgrade_repo"]))
+async def upgrade_upload_handler(_, message: Message):
     user_id = message.from_user.id
     token = await get_token(user_id)
     
     if not token:
-        return await message.reply_text("🔑 Set token first using `/settoken`.")
+        return await message.reply_text("🔑 **Please set your token first:** `/settoken <token>`")
 
     if not message.reply_to_message or not message.reply_to_message.document:
-        return await message.reply_text("❌ Reply to a **.zip** file.")
+        return await message.reply_text("❌ Please reply to a **.zip** file.")
 
-    if len(message.command) < 2:
-        return await message.reply_text("❌ Usage: `/upload <repo_name>`")
-    
+    # Format: /upload_repo <repo_name> <old_word> <new_word>
+    if len(message.command) < 4:
+        return await message.reply_text(
+            "❌ **Invalid Format!**\n\n"
+            "**Usage:** `/upload_repo <repo_name> <word_to_find> <word_to_replace>`\n"
+            "**Example:** `/upload_repo MyBot VIPMUSIC NEW_BRAND`"
+        )
+
     repo_name = message.command[1]
-    status = await message.reply_text("⏳ **Connecting to GitHub...**")
-    
+    old_word = message.command[2]
+    new_word = message.command[3]
+
+    status = await message.reply_text(f"⏳ **Initializing...**\n🔄 Task: Replacing `{old_word}` with `{new_word}`")
+
     try:
         g = Github(token)
         user = g.get_user()
-        
-        # --- FIXED: AUTO-CREATE REPO ON 404 ---
+
+        # Repository Setup
         try:
             repo = user.get_repo(repo_name)
-        except Exception as e:
-            if "404" in str(e):
-                await status.edit(f"🔨 Repo `{repo_name}` not found. Creating it for you...")
-                repo = user.create_repo(repo_name, auto_init=True)
-                time.sleep(2) # Wait for GitHub to initialize
-            else:
-                raise e
+        except:
+            await status.edit(f"🔨 Creating new repository: `{repo_name}`...")
+            repo = user.create_repo(repo_name, auto_init=True)
+            time.sleep(2)
 
-        # Download file
-        await status.edit("📥 **Downloading from Telegram...**")
+        # Download and Extract
+        await status.edit("📥 **Downloading ZIP from Telegram...**")
         file_path = await message.reply_to_message.download()
-        
-        if file_path.endswith(".zip"):
-            extract_dir = f"work_{user_id}"
-            if os.path.exists(extract_dir): shutil.rmtree(extract_dir)
-            os.makedirs(extract_dir)
-            
-            with zipfile.ZipFile(file_path, 'r') as zip_ref:
-                zip_ref.extractall(extract_dir)
+        extract_dir = f"work_{user_id}_{int(time.time())}"
+        os.makedirs(extract_dir)
 
-            # Skip parent folder logic
-            contents = os.listdir(extract_dir)
-            upload_from = extract_dir
-            if len(contents) == 1 and os.path.isdir(os.path.join(extract_dir, contents[0])):
-                upload_from = os.path.join(extract_dir, contents[0])
+        with zipfile.ZipFile(file_path, 'r') as zip_ref:
+            zip_ref.extractall(extract_dir)
 
-            await status.edit("🚀 **Uploading files to GitHub Root...**")
-            count = 0
-            for root, _, files in os.walk(upload_from):
-                for f in files:
-                    local_p = os.path.join(root, f)
-                    git_p = os.path.relpath(local_p, upload_from)
-                    
-                    with open(local_p, "rb") as df:
-                        content = df.read()
-                    
-                    # Upload with SHA Conflict Fix (409)
-                    try:
-                        try:
-                            old = repo.get_contents(git_p)
-                            repo.update_file(old.path, f"Update {git_p}", content, old.sha)
-                        except Exception as up_e:
-                            if "404" in str(up_e):
-                                repo.create_file(git_p, f"Upload {git_p}", content)
-                            elif "409" in str(up_e):
-                                # Re-fetch SHA on conflict
-                                old = repo.get_contents(git_p)
-                                repo.update_file(old.path, f"Fix: {git_p}", content, old.sha)
-                            else:
-                                raise up_e
-                        count += 1
-                    except Exception as fatal:
-                        print(f"Failed {git_p}: {fatal}")
-            
-            await status.edit(f"✅ **Upload Success!**\n📦 Total `{count}` files added to `{repo_name}`.\n🔗 [View Repo]({repo.html_url})", disable_web_page_preview=True)
-            shutil.rmtree(extract_dir)
+        await status.edit("🚀 **Refactoring Code & Uploading to GitHub...**")
         
-        else:
-            # Single file logic
-            filename = os.path.basename(file_path)
-            with open(file_path, "rb") as f: content = f.read()
-            try:
+        # Identify base directory
+        upload_from = extract_dir
+        subdirs = os.listdir(extract_dir)
+        if len(subdirs) == 1 and os.path.isdir(os.path.join(extract_dir, subdirs[0])):
+            upload_from = os.path.join(extract_dir, subdirs[0])
+
+        count = 0
+        for root, dirs, files in os.walk(upload_from):
+            for f in files:
+                local_path = os.path.join(root, f)
+                
+                # 1. READ & REPLACE CONTENT (Refactor Imports/Strings)
                 try:
-                    old = repo.get_contents(filename)
-                    repo.update_file(old.path, f"Update {filename}", content, old.sha)
-                except:
-                    repo.create_file(filename, f"Upload {filename}", content)
-                await status.edit(f"✅ Uploaded `{filename}`.")
-            except: pass
+                    with open(local_path, "rb") as file_data:
+                        content = file_data.read()
+                    
+                    # Only refactor text-based files
+                    if f.endswith(('.py', '.txt', '.md', '.yml', '.yaml', '.conf', '.env', '.json')):
+                        try:
+                            text = content.decode('utf-8')
+                            if old_word in text:
+                                text = text.replace(old_word, new_word)
+                                content = text.encode('utf-8')
+                        except:
+                            pass # Binary or unknown encoding
+                except Exception as e:
+                    print(f"Error reading {f}: {e}")
 
-        if os.path.exists(file_path): os.remove(file_path)
+                # 2. RENAME PATHS (Refactor Folder/File names)
+                relative_path = os.path.relpath(local_path, upload_from)
+                # Replace the old word in the directory structure
+                git_path = relative_path.replace(old_word, new_word).replace("\\", "/")
+
+                # 3. UPLOAD TO GITHUB
+                try:
+                    try:
+                        # Update existing file (SHA required)
+                        existing_file = repo.get_contents(git_path)
+                        repo.update_file(existing_file.path, f"Refactored: {old_word} to {new_word}", content, existing_file.sha)
+                    except:
+                        # Create new file
+                        repo.create_file(git_path, f"Uploaded: {git_path}", content)
+                    count += 1
+                except Exception as upload_err:
+                    print(f"Failed to upload {git_path}: {upload_err}")
+
+        await status.edit(
+            f"✅ **Repository Upgraded Successfully!**\n\n"
+            f"📦 **Repository:** `{repo_name}`\n"
+            f"🔄 **Refactored:** `{old_word}` ➔ `{new_word}`\n"
+            f"📄 **Total Files:** `{count}`\n\n"
+            f"🔗 **[View on GitHub]({repo.html_url})**",
+            disable_web_page_preview=True
+        )
+
+        # Cleanup temporary files
+        shutil.rmtree(extract_dir)
+        if os.remove(file_path): os.remove(file_path)
 
     except Exception as e:
         await status.edit(f"❌ **GitHub Error:** `{str(e)}`")
 
-__MODULE__ = "Rᴇᴘᴏ"
+@app.on_message(filters.command("settoken"))
+async def set_token_cmd(_, message: Message):
+    if len(message.command) < 2: 
+        return await message.reply_text("Usage: `/settoken <your_github_token>`")
+    await tokens_col.update_one({"user_id": message.from_user.id}, {"$set": {"token": message.command[1]}}, upsert=True)
+    await message.reply_text("✅ GitHub Token saved!")
+
+@app.on_message(filters.command("deltoken"))
+async def del_token_cmd(_, message: Message):
+    await tokens_col.delete_one({"user_id": message.from_user.id})
+    await message.reply_text("🗑️ GitHub Token deleted.")
+
+__MODULE__ = "Upgrade"
 __HELP__ = HELP_TEXT
