@@ -11,12 +11,23 @@ from pyrogram.types import (
 )
 
 from VIPMUSIC import app
-from VIPMUSIC.utils.nightmodedb import (
-    get_nightchats,
-    nightdb,
-    nightmode_off,
-    nightmode_on,
-)
+# Database logic ko isi file mein merge kar diya gaya hai error fix karne ke liye
+from VIPMUSIC.core.mongo import mongodb
+
+# --- Database Setup ---
+nightdb = mongodb.nightmode
+
+async def get_nightchats() -> list:
+    chats = nightdb.find({"chat_id": {"$exists": True}})
+    if not chats:
+        return []
+    return await chats.to_list(length=10000)
+
+async def nightmode_on(chat_id: int):
+    return await nightdb.insert_one({"chat_id": chat_id})
+
+async def nightmode_off(chat_id: int):
+    return await nightdb.delete_one({"chat_id": chat_id})
 
 # Logging configuration
 logging.basicConfig(level=logging.INFO)
