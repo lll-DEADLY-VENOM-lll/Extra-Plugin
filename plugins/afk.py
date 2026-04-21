@@ -3,9 +3,16 @@ import time
 from pyrogram import filters
 from pyrogram.enums import MessageEntityType
 from pyrogram.types import Message
-from VIPMUSIC import app
-from VIPMUSIC.utils.afkdb import add_afk, is_afk, remove_afk
-from VIPMUSIC.utils.readable_time import get_readable_time
+
+# Smart Imports: Yeh error ko prevent karega
+try:
+    from VIPMUSIC import app
+    from VIPMUSIC.utils.afkdb import add_afk, is_afk, remove_afk
+    from VIPMUSIC.utils.readable_time import get_readable_time
+except ModuleNotFoundError:
+    import app
+    from utils.afkdb import add_afk, is_afk, remove_afk
+    from utils.readable_time import get_readable_time
 
 @app.on_message(filters.command(["afk", "brb"], prefixes=["/", "!"]))
 async def active_afk(_, message: Message):
@@ -37,7 +44,7 @@ async def active_afk(_, message: Message):
         except Exception:
             await message.reply_text(f"**{message.from_user.first_name}** ɪs ʙᴀᴄᴋ ᴏɴʟɪɴᴇ")
 
-    # AFK sᴇᴛᴛɪɴɢ ʟᴏɢɪᴄ
+    # AFK setting logic
     if len(message.command) == 1 and not message.reply_to_message:
         details = {"type": "text", "time": time.time(), "data": None, "reason": None}
     elif len(message.command) > 1 and not message.reply_to_message:
