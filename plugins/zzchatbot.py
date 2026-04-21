@@ -1,5 +1,6 @@
 import random
 import re
+import asyncio
 from pymongo import MongoClient
 from pyrogram import Client, filters
 from pyrogram.enums import ChatAction, ChatMemberStatus
@@ -17,168 +18,172 @@ worddb = MongoClient(WORD_MONGO_URL)
 status_db = chatdb["ChatBotStatusDb"]["StatusCollection"]
 chatai = worddb["Word"]["WordDb"] 
 lang_db = chatdb["ChatLangDb"]["LangCollection"]
+bio_db = chatdb["ChatBioDb"]["BioSettings"] # Naya database bio settings ke liye
 
-# --- Female Tone Logic ---
+__MODULE__ = "Chatbot"
+__HELP__ = """
+<b>Chatbot Commands:</b>
+• /chatbot - Chatbot settings toggle (Enable/Disable).
+• /biolink on - Bio mein link rakhne waalo ke messages delete karein.
+• /biolink off - Sabko message karne ki ijazat de (Free mode).
+
+<b>Features:</b>
+• New member welcome.
+• Auto link deleter in messages.
+• Female tone chatbot.
+• Abuse filter.
+• Profile Bio link protection.
+"""
+
+# --- Helper Functions ---
+async def is_admin(client, chat_id, user_id):
+    if chat_id > 0: return True
+    try:
+        member = await client.get_chat_member(chat_id, user_id)
+        return member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]
+    except: return False
+
 def make_female_tone(text):
     replacements = {
-        r"\braha hoon\b": "rahi hoon",
-        r"\braha tha\b": "rahi thi",
-        r"\braha hai\b": "rahi hai",
-        r"\bgaya tha\b": "gayi thi",
-        r"\bgaya\b": "gayi",
-        r"\btha\b": "thi",
-        r"\bkhata hoon\b": "khati hoon",
-        r"\bkarunga\b": "karungi",
-        r"\baaunga\b": "aaungi",
-        r"\bdekhunga\b": "dekhungi",
-        r"\bbhai\b": "behen 🌸",
-        r"\bbhaiya\b": "didi",
-        r"\bpagal\b": "pagli",
+        r"\braha hoon\b": "rahi hoon", r"\braha tha\b": "rahi thi",
+        r"\braha hai\b": "rahi hai", r"\bgaya tha\b": "gayi thi",
+        r"\bgaya\b": "gayi", r"\btha\b": "thi",
+        r"\bbhai\b": "behen 🌸", r"\bbhaiya\b": "didi",
         r"\bhoon\b": "hoon ji ✨"
     }
     for pattern, replacement in replacements.items():
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
     return text
 
-# --- Abuse Filter ---
 ABUSIVE_WORDS = ["saala", "bc", "mc", "chutiya", "randi", "bhadwa", "kamine", "gaand", "madarchod"]
 
-# --- Helper Functions ---
-async def is_admin(client, chat_id, user_id):
-    if chat_id > 0: return True # Private chat
-    try:
-        member = await client.get_chat_member(chat_id, user_id)
-        return member.status in [ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER]
-    except:
-        return False
+# ==========================================
+# 1. BIO-LINK PROTECTION (The "Free/Unfree" logic)
+# ==========================================
+@nexichat.on_message(filters.group & ~filters.bot, group=1)
+async def bio_and_link_guard(client: Client, message: Message):
+    if not message.from_user: return
+    
+    chat_id = message.chat.id
+    user_id = message.from_user.id
 
-def get_chat_language(chat_id):
-    chat_lang = lang_db.find_one({"chat_id": chat_id})
-    return chat_lang["language"] if chat_lang and "language" in chat_lang else "hi"
+    # Admin ko check karne ki zaroorat nahi
+    if await is_admin(client, chat_id, user_id):
+        return
 
-async def get_reply(word: str):
-    # Try exact match
-    is_chat = list(chatai.find({"word": word.lower()}))
-    if not is_chat:
-        # Fallback: Get a random reply from database
-        is_chat = list(chatai.aggregate([{"$sample": {"size": 1}}]))
-    return random.choice(is_chat) if is_chat else None
+    # A. Check for link in Message Text
+    link_pattern = r"(https?://)?(t\.me|telegram\.me|telegram\.dog)/[a-zA-Z0-9_]+"
+    if message.text and re.search(link_pattern, message.text):
+        try:
+            await message.delete()
+            warn = await message.reply_text(f"⚠️ {message.from_user.mention}, Links allow nahi hain!")
+            await asyncio.sleep(4)
+            return await warn.delete()
+        except: return
 
-# --- Chatbot Logic ---
+    # B. Check for link in Profile BIO (Free/Unfree Logic)
+    # Check if Bio Protection is ON for this group
+    bio_check = bio_db.find_one({"chat_id": chat_id})
+    if bio_check and bio_check.get("status") == "on":
+        try:
+            # User ki profile fetch karna
+            user_info = await client.get_chat(user_id)
+            bio_text = user_info.bio or ""
+            
+            if re.search(link_pattern, bio_text):
+                await message.delete()
+                warn = await message.reply_text(f"🚫 {message.from_user.mention}, Aapke Bio mein link hai. Pehle use hatayein tabhi message kar payenge.")
+                await asyncio.sleep(4)
+                await warn.delete()
+        except Exception:
+            pass
 
+# ==========================================
+# 2. BIO PROTECTION TOGGLE COMMANDS
+# ==========================================
+@nexichat.on_message(filters.command("biolink") & filters.group)
+async def set_bio_mode(client: Client, message: Message):
+    if not await is_admin(client, message.chat.id, message.from_user.id):
+        return await message.reply_text("Sirf admins ye command use kar sakte hain.")
+
+    if len(message.command) < 2:
+        return await message.reply_text("Usage: `/biolink on` (Delete messages) ya `/biolink off` (Free mode)")
+
+    choice = message.command[1].lower()
+    if choice == "on":
+        bio_db.update_one({"chat_id": message.chat.id}, {"$set": {"status": "on"}}, upsert=True)
+        await message.reply_text("✅ Bio-Link Protection **ON**! Ab jin logon ke bio mein link hoga, unke message delete ho jayenge.")
+    elif choice == "off":
+        bio_db.update_one({"chat_id": message.chat.id}, {"$set": {"status": "off"}}, upsert=True)
+        await message.reply_text("✅ Bio-Link Protection **OFF** (Free)! Ab sab message kar sakte hain.")
+    else:
+        await message.reply_text("Invalid option! Use 'on' or 'off'.")
+
+# ==========================================
+# 3. NEW MEMBER WELCOME
+# ==========================================
+@nexichat.on_message(filters.new_chat_members)
+async def welcome_member(client: Client, message: Message):
+    for member in message.new_chat_members:
+        if member.id == (await client.get_me()).id: continue
+        await message.reply_text(f"Swagat hai {member.mention} ji! 🌸\nGroup mein masti karo par tameez se. 😊")
+
+# ==========================================
+# 4. CHATBOT LOGIC
+# ==========================================
 @nexichat.on_message((filters.text | filters.sticker) & ~filters.bot, group=2)
 async def chatbot_response(client: Client, message: Message):
     chat_id = message.chat.id
     user_text = message.text.lower() if message.text else ""
-    
-    # 1. Check if chatbot is disabled for this chat
+    bot_me = await client.get_me()
+
     chat_status = status_db.find_one({"chat_id": chat_id})
-    if chat_status and chat_status.get("status") == "disabled":
-        return
+    if chat_status and chat_status.get("status") == "disabled": return
+    if user_text.startswith(("/", "!", ".")): return
 
-    # 2. Skip commands
-    if user_text.startswith(("/", "!", ".")):
-        return
-
-    # 3. Special "Radhe Radhe" Logic
-    if "radhe" in user_text:
-        radhe_replies = [
-            "Radhe Radhe ji! 🌸 Kanha ji aap par hamesha kripa banaye rakhein.",
-            "Radhe Radhe! ✨ Kaise ho aap? Krishna ki bhakti mein hi shanti hai. 🙏",
-            "Radhe Radhe! ❤️ Bolo Radhe-Krishna ki Jai! 😊",
-            "Radhe Radhe! 🌸 Aapka din bahut achha jaye ji."
-        ]
-        await client.send_chat_action(chat_id, ChatAction.TYPING)
-        return await message.reply_text(random.choice(radhe_replies))
-
-    # 4. Abuse Filter
+    # Abuse Filter
     if any(word in user_text for word in ABUSIVE_WORDS):
-        return await message.reply_text("Gandi baat nahi karte! Tameez se bolo. 😡")
-
-    # 5. Trigger Conditions (Bot kab reply karega)
-    is_private = message.chat.type.value == "private"
-    is_reply_to_me = message.reply_to_message and message.reply_to_message.from_user.id == (await client.get_me()).id
-    
-    # Keyword list to trigger bot in groups
-    keywords = ["hi", "hello", "kaise", "bot", "zoya", "hey", "namaste", "sun"]
-    is_keyword = any(re.search(rf"\b{word}\b", user_text) for word in keywords)
+        return await message.reply_text("Gandi baat nahi! 😡 Tameez rakhein.")
 
     # Trigger logic
-    if is_private or is_reply_to_me or is_keyword:
+    is_private = message.chat.type.value == "private"
+    is_reply_to_me = message.reply_to_message and message.reply_to_message.from_user.id == bot_me.id
+    is_mentioned = f"@{bot_me.username.lower()}" in user_text or "zoya" in user_text
+    
+    if is_private or is_reply_to_me or is_mentioned or (random.random() < 0.20):
         await client.send_chat_action(chat_id, ChatAction.TYPING)
         
-        reply_data = await get_reply(user_text)
+        is_chat = list(chatai.find({"word": user_text}))
+        if not is_chat:
+            is_chat = list(chatai.aggregate([{"$sample": {"size": 1}}]))
         
-        if reply_data:
-            response_text = reply_data["text"]
-            check_type = reply_data.get("check")
-
-            # Female Tone
-            if check_type != "sticker" and check_type != "photo":
-                response_text = make_female_tone(response_text)
-
-            # Translation
-            chat_lang = get_chat_language(chat_id)
-            if chat_lang not in ["hi", "en", "nolang"]:
-                try:
-                    response_text = GoogleTranslator(source='auto', target=chat_lang).translate(response_text)
-                except:
-                    pass
-
-            # Final Reply Execution
-            if check_type == "sticker":
-                await message.reply_sticker(response_text)
-            elif check_type == "photo":
-                await message.reply_photo(response_text)
+        if is_chat:
+            reply_data = random.choice(is_chat)
+            res = make_female_tone(reply_data["text"]) if reply_data.get("check") != "sticker" else reply_data["text"]
+            
+            if reply_data.get("check") == "sticker":
+                await message.reply_sticker(res)
             else:
-                await message.reply_text(response_text)
-        else:
-            if is_private:
-                await message.reply_text("Umm... main samajh nahi paayi, par sunne mein achha laga! 🌸")
+                await message.reply_text(res)
 
-    # 6. Learning Logic (Save replies)
-    if message.reply_to_message and not any(word in user_text for word in ABUSIVE_WORDS):
-        if message.text and len(message.text) > 1:
-            await save_reply(message.reply_to_message, message)
-
-async def save_reply(original_message: Message, reply_message: Message):
-    if not original_message.text: return
-    
-    content = reply_message.text or (reply_message.sticker.file_id if reply_message.sticker else None)
-    if not content: return
-
-    check_type = "sticker" if reply_message.sticker else "none"
-    trigger = original_message.text.lower()
-    
-    if not chatai.find_one({"word": trigger, "text": content}):
-        chatai.insert_one({"word": trigger, "text": content, "check": check_type})
-
-# --- Admin Commands ---
-
+# --- Admin Command for Chatbot Toggle ---
 @nexichat.on_message(filters.command("chatbot"))
 async def chat_toggle(client: Client, message: Message):
     if not await is_admin(client, message.chat.id, message.from_user.id):
-        return await message.reply_text("Sirf admins hi ye kar sakte hain! ❌")
+        return await message.reply_text("No Permission! ❌")
 
     status = "Enabled ✅"
     curr = status_db.find_one({"chat_id": message.chat.id})
-    if curr and curr.get("status") == "disabled":
-        status = "Disabled ❌"
+    if curr and curr.get("status") == "disabled": status = "Disabled ❌"
 
-    buttons = [[
-        InlineKeyboardButton("Enable", callback_data="enable_chatbot"),
-        InlineKeyboardButton("Disable", callback_data="disable_chatbot")
-    ]]
-    await message.reply_text(
-        f"<b>Chatbot Settings for {message.chat.title if message.chat.title else 'Private Chat'}</b>\n\nStatus: {status}",
-        reply_markup=InlineKeyboardMarkup(buttons)
-    )
+    buttons = [[InlineKeyboardButton("Enable", callback_data="enable_chatbot"),
+                InlineKeyboardButton("Disable", callback_data="disable_chatbot")]]
+    await message.reply_text(f"Chatbot Status: {status}", reply_markup=InlineKeyboardMarkup(buttons))
 
 @nexichat.on_callback_query(filters.regex(r"^(enable|disable)_chatbot$"))
 async def cb_handler(client: Client, query: CallbackQuery):
     if not await is_admin(client, query.message.chat.id, query.from_user.id):
-        return await query.answer("Access Denied! ⛔", show_alert=True)
-
+        return await query.answer("Mana kiya na! ⛔", show_alert=True)
     action = query.data.split("_")[0]
     status_db.update_one({"chat_id": query.message.chat.id}, {"$set": {"status": f"{action}d"}}, upsert=True)
-    await query.edit_message_text(f"✅ Chatbot has been **{action}d** successfully!")
+    await query.edit_message_text(f"Chatbot {action}d successfully!")
