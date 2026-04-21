@@ -7,7 +7,6 @@ from pyrogram.types import Message
 # Smart Imports: Yeh error ko prevent karega
 try:
     from VIPMUSIC import app
-    from VIPMUSIC.utils.afkdb import add_afk, is_afk, remove_afk
     from VIPMUSIC.utils.readable_time import get_readable_time
 except ModuleNotFoundError:
     import app
