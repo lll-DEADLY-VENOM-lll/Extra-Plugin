@@ -1,61 +1,67 @@
 import re
-import requests
+import httpx
+import asyncio
 from pyrogram import filters
-
 from VIPMUSIC import app
 from config import LOG_GROUP_ID
 
+# Instagram URL regex
+INSTAGRAM_RE = re.compile(r"https?://(www\.)?instagram\.com/(reel|p|tv)/[a-zA-Z0-9_-]+/")
 
 @app.on_message(filters.command(["ig", "instagram", "reel"]))
 async def download_instagram_video(client, message):
     if len(message.command) < 2:
-        await message.reply_text(
+        return await message.reply_text(
             "Pʟᴇᴀsᴇ ᴘʀᴏᴠɪᴅᴇ ᴛʜᴇ Iɴsᴛᴀɢʀᴀᴍ ʀᴇᴇʟ URL ᴀғᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ"
         )
-        return
+
     url = message.text.split()[1]
-    if not re.match(
-        re.compile(r"^(https?://)?(www\.)?(instagram\.com|instagr\.am)/.*$"), url
-    ):
+    
+    if not INSTAGRAM_RE.match(url):
         return await message.reply_text(
             "Tʜᴇ ᴘʀᴏᴠɪᴅᴇᴅ URL ɪs ɴᴏᴛ ᴀ ᴠᴀʟɪᴅ Iɴsᴛᴀɢʀᴀᴍ URL😅😅"
         )
-    a = await message.reply_text("ᴘʀᴏᴄᴇssɪɴɢ...")
-    api_url = f"https://insta-dl.hazex.workers.dev/?url={url}"
 
-    response = requests.get(api_url)
+    m = await message.reply_text("ᴘʀᴏᴄᴇssɪɴɢ... ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ.")
+
+    # Using a more stable public API
+    # Note: If this API fails, you can replace it with another provider
+    api_url = f"https://api.mantisapi.com/api/instagram?url={url}"
+
     try:
-        result = response.json()
-        data = result["result"]
-    except Exception as e:
-        f = f"Eʀʀᴏʀ :\n{e}"
-        try:
-            await a.edit(f)
-        except Exception:
-            await message.reply_text(f)
-            return await app.send_message(LOG_GROUP_ID, f)
-        return await app.send_message(LOG_GROUP_ID, f)
-    if not result["error"]:
-        video_url = data["url"]
-        duration = data["duration"]
-        quality = data["quality"]
-        type = data["extension"]
-        size = data["formattedSize"]
-        caption = f"**Dᴜʀᴀᴛɪᴏɴ :** {duration}\n**Qᴜᴀʟɪᴛʏ :** {quality}\n**Tʏᴘᴇ :** {type}\n**Sɪᴢᴇ :** {size}"
-        await a.delete()
-        await message.reply_video(video_url, caption=caption)
-    else:
-        try:
-            return await a.edit("Fᴀɪʟᴇᴅ ᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ ʀᴇᴇʟ")
-        except Exception:
-            return await message.reply_text("Fᴀɪʟᴇᴅ ᴛᴏ ᴅᴏᴡɴʟᴏᴀᴅ ʀᴇᴇʟ")
+        async with httpx.AsyncClient(timeout=20) as session:
+            response = await session.get(api_url)
+            if response.status_code != 200:
+                return await m.edit("Sᴇʀᴠᴇʀ Eʀʀᴏʀ! Pʟᴇᴀsᴇ ᴛʀʏ ᴀɢᴀɪɴ ʟᴀᴛᴇʀ.")
+            
+            res = response.json()
+            
+            # API response check (Mantis API structure)
+            if not res.get("status"):
+                return await m.edit("Fᴀɪʟᴇᴅ ᴛᴏ ғᴇᴛᴄʜ ᴠɪᴅᴇᴏ. Mᴀᴋᴇ sᴜʀᴇ ᴛʜᴇ ᴀᴄᴄᴏᴜɴᴛ ɪs ᴘᴜʙʟɪᴄ.")
 
+            data = res.get("data", [])
+            if not data:
+                return await m.edit("Nᴏ ᴍᴇᴅɪᴀ ғᴏᴜɴᴅ.")
+
+            # Downloading first media item
+            video_url = data[0].get("url")
+            
+            await m.delete()
+            await message.reply_video(
+                video=video_url,
+                caption=f"✨ **Dᴏᴡɴʟᴏᴀᴅᴇᴅ ʙʏ:** @{app.username}"
+            )
+
+    except Exception as e:
+        await m.edit(f"Eʀʀᴏʀ: `{str(e)}`")
+        await app.send_message(LOG_GROUP_ID, f"IG Download Error: {e}")
 
 __MODULE__ = "Rᴇᴇʟ"
 __HELP__ = """
 **ɪɴsᴛᴀɢʀᴀᴍ ʀᴇᴇʟ ᴅᴏᴡɴʟᴏᴀᴅᴇʀ:**
 
-• `/ig [URL]`: ᴅᴏᴡɴʟᴏᴀᴅ ɪɴsᴛᴀɢʀᴀᴍ ʀᴇᴇʟs. Pʀᴏᴠɪᴅᴇ ᴛʜᴇ ɪɴsᴛᴀɢʀᴀᴍ ʀᴇᴇʟ URL ᴀғᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ.
-• `/instagram [URL]`: ᴅᴏᴡɴʟᴏᴀᴅ ɪɴsᴛᴀɢʀᴀᴍ ʀᴇᴇʟs. Pʀᴏᴠɪᴅᴇ ᴛʜᴇ ɪɴsᴛᴀɢʀᴀᴍ ʀᴇᴇʟ URL ᴀғᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ.
-• `/reel [URL]`: ᴅᴏᴡɴʟᴏᴀᴅ ɪɴsᴛᴀɢʀᴀᴍ ʀᴇᴇʟs. Pʀᴏᴠɪᴅᴇ ᴛʜᴇ ɪɴsᴛᴀɢʀᴀᴍ ʀᴇᴇʟ URL ᴀғᴛᴇʀ ᴛʜᴇ ᴄᴏᴍᴍᴀɴᴅ.
+• `/ig [URL]`: ᴅᴏᴡɴʟᴏᴀᴅ ɪɴsᴛᴀɢʀᴀᴍ ʀᴇᴇʟs.
+• `/instagram [URL]`: ᴅᴏᴡɴʟᴏᴀᴅ ɪɴsᴛᴀɢʀᴀᴍ ʀᴇᴇʟs.
+• `/reel [URL]`: ᴅᴏᴡɴʟᴏᴀᴅ ɪɴsᴛᴀɢʀᴀᴍ ʀᴇᴇʟs.
 """
