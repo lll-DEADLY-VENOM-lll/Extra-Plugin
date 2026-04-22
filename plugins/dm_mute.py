@@ -7,7 +7,7 @@ from pyrogram.errors import UserNotParticipant, ChatAdminRequired
 # Database to store mute records
 muted_db = {} 
 
-__MODULE__ = "SmartJudge"
+__MODULE__ = "ᴅᴍ ᴍᴜᴛᴇ"
 __HELP__ = """
 **Smart Judge Bot (4 Hours Mute)**
 
