@@ -16,9 +16,6 @@ Pillow
 motor
 pytz
 fastapi
-uvicorn
 httpx
-yt-dlp
-tzdata
 https://github.com/KurimuzonAkuma/pyrogram/archive/v2.1.23.zip
 git+https://github.com/lll-DEADLY-VENOM-lll/TheApi@main
