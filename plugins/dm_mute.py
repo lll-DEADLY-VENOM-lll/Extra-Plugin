@@ -82,8 +82,8 @@ async def catch_photo(_, message):
     await message.reply_text("✅ Proof mil gaya. Ab us **Group ki ID (-100xxx)** bhejiye.")
 
 # --- 5. PRIVATE TEXT HANDLER (Logic & Appeal) ---
-# Yahan 'filters.command' ko exclude kiya hai taaki commands block na hon
-@app.on_message(filters.private & filters.text & ~filters.command)
+# FIX: Added parentheses to filters.command and a list of commands to exclude
+@app.on_message(filters.private & filters.text & ~filters.command(["start", "help", "report", "smartjudge"]))
 async def handle_private_logic(client, message):
     user_id = message.from_user.id
     text = message.text.strip()
@@ -113,7 +113,7 @@ async def handle_private_logic(client, message):
             if user_id in waiting_for_link: del waiting_for_link[user_id]
         return
 
-    # --- B. Appeal Logic (Muted user ke liye) ---
+    # --- B. Appeal Logic ---
     u_id = str(user_id)
     if u_id in muted_db:
         keywords = ["sorry", "galti", "maaf", "help", "work", "important", "zaroori", "puchna", "unmute"]
@@ -127,5 +127,4 @@ async def handle_private_logic(client, message):
                 del muted_db[u_id]
             except: pass
         else:
-            # Ye sirf tabhi aayega jab user muted ho aur koi faltu text bheje
             await message.reply_text("🤨 Safai sahi nahi hai. Kam se kam 5 words mein explain karo kyun DM kiya? Ya phir wait karo.")
