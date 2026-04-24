@@ -1,6 +1,7 @@
 import random
 import re
 import aiohttp
+import google.generativeai as genai
 from urllib.parse import quote
 from pymongo import MongoClient
 from pyrogram import Client, filters
@@ -11,39 +12,46 @@ from config import MONGO_DB_URI as MONGO_URL
 import config
 from VIPMUSIC import app as nexichat
 
+# --- API Keys Configuration ---
+# Gemini API Key yahan dalein (Free from: https://aistudio.google.com/app/apikey)
+GEMINI_API_KEY = "AIzaSyBxwcxTICnoLHp9iLOc_c83V_Wf3IaG-8I" 
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel('gemini-pro')
+
 # --- Database Setup ---
 chatdb = MongoClient(MONGO_URL)
 status_db = chatdb["ChatBotStatusDb"]["StatusCollection"]
 lang_db = chatdb["ChatLangDb"]["LangCollection"]
 
-# --- Highly Stable APIs (No Keys Needed) ---
-# 1. Popcat API (Saalon se stable hai)
-API_STABLE = "https://api.popcat.xyz/chatbot?msg={}&owner=Vishal&botname=Zoya"
-# 2. Hercai API (Modern AI Model)
-API_BACKUP = "https://hercai.onrender.com/v3/hercai?question={}"
+# --- Female Tone Instruction ---
+# Gemini ko instruct karne ke liye instruction string
+SYSTEM_INSTRUCTION = "Tu ek cute Indian ladki hai jiska naam Zoya hai. Hamesha ladkiyon ki tarah baat kar (jaise 'main kar rahi hoon', 'kha rahi hoon'). Hindi aur English mix use kar (Hinglish). Short aur sweet jawab de."
 
-# --- Female Tone Logic ---
+# --- Regex for extra safety (Manual Tone) ---
 def make_female_tone(text):
     if not text: return text
     replacements = {
         r"\braha hoon\b": "rahi hoon",
         r"\braha tha\b": "rahi thi",
-        r"\braha hai\b": "rahi hai",
         r"\bgaya tha\b": "gayi thi",
         r"\bgaya\b": "gayi",
-        r"\btha\b": "thi",
-        r"\bkhata hoon\b": "khati hoon",
-        r"\bkarunga\b": "karungi",
-        r"\baaunga\b": "aaungi",
-        r"\bdekhunga\b": "dekhungi",
         r"\bbhai\b": "behen 🌸",
-        r"\bbhaiya\b": "didi",
-        r"\bpagal\b": "pagli",
         r"\bhoon\b": "hoon ji ✨"
     }
     for pattern, replacement in replacements.items():
         text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
     return text
+
+# --- Gemini API Logic ---
+async def get_gemini_response(user_input):
+    try:
+        # Prompt mein system instruction add kar rahe hain taaki tone female rahe
+        prompt = f"{SYSTEM_INSTRUCTION}\n\nUser: {user_input}\nZoya:"
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        print(f"Gemini Error: {e}")
+        return None
 
 # --- Helper Functions ---
 async def is_admin(client, chat_id, user_id):
@@ -57,27 +65,6 @@ async def is_admin(client, chat_id, user_id):
 def get_chat_language(chat_id):
     chat_lang = lang_db.find_one({"chat_id": chat_id})
     return chat_lang["language"] if chat_lang and "language" in chat_lang else "hi"
-
-# --- Fetcher with Double Fallback ---
-async def get_working_reply(text):
-    msg = quote(text)
-    async with aiohttp.ClientSession() as session:
-        # Step 1: Popcat API try karein (Very Stable)
-        try:
-            async with session.get(API_STABLE.format(msg), timeout=8) as r1:
-                if r1.status == 200:
-                    data = await r1.json()
-                    return data.get("response")
-        except: pass
-
-        # Step 2: Hercai API try karein (Backup)
-        try:
-            async with session.get(API_BACKUP.format(msg), timeout=8) as r2:
-                if r2.status == 200:
-                    data = await r2.json()
-                    return data.get("reply")
-        except: pass
-    return None
 
 # --- Main Logic ---
 
@@ -105,29 +92,19 @@ async def chatbot_response(client: Client, message: Message):
         
         await client.send_chat_action(chat_id, ChatAction.TYPING)
         
-        # Working API se reply mangwana
-        raw_reply = await get_working_reply(message.text)
+        # Gemini AI se response lena
+        raw_reply = await get_gemini_response(message.text)
         
         if raw_reply:
-            # 1. Female Tone apply karna
+            # Tone final check
             final_text = make_female_tone(raw_reply)
-
-            # 2. Translation (Kyunki ye APIs English mein hoti hain)
-            chat_lang = get_chat_language(chat_id)
-            if chat_lang not in ["nolang"]: # Default Hindi/Any
-                try:
-                    # Translate to chat's preferred language (Default hi)
-                    target = chat_lang if chat_lang != "en" else "en"
-                    final_text = GoogleTranslator(source='auto', target=target).translate(final_text)
-                except: pass
-            
             await message.reply_text(final_text)
         else:
+            # Agar Gemini bhi fail ho jaye toh default message
             if is_private:
-                await message.reply_text("Uff... abhi mood thoda off hai, baad mein baat karein? 🌸")
+                await message.reply_text("Uff... mera mood thoda off hai, baad mein baat karein? 🌸")
 
-# --- Admin Controls ---
-
+# --- Admin Controls (Same as before) ---
 @nexichat.on_message(filters.command("chatbot"))
 async def chat_toggle(client: Client, message: Message):
     if not await is_admin(client, message.chat.id, message.from_user.id):
