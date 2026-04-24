@@ -16,8 +16,11 @@ chatdb = MongoClient(MONGO_URL)
 status_db = chatdb["ChatBotStatusDb"]["StatusCollection"]
 lang_db = chatdb["ChatLangDb"]["LangCollection"]
 
-# --- API Configuration ---
-CHAT_API_URL = "https://api.safone.dev/chatbot?msg={}&user_id={}&char=Zoya"
+# --- Highly Stable APIs (No Keys Needed) ---
+# 1. Popcat API (Saalon se stable hai)
+API_STABLE = "https://api.popcat.xyz/chatbot?msg={}&owner=Vishal&botname=Zoya"
+# 2. Hercai API (Modern AI Model)
+API_BACKUP = "https://hercai.onrender.com/v3/hercai?question={}"
 
 # --- Female Tone Logic ---
 def make_female_tone(text):
@@ -55,77 +58,80 @@ def get_chat_language(chat_id):
     chat_lang = lang_db.find_one({"chat_id": chat_id})
     return chat_lang["language"] if chat_lang and "language" in chat_lang else "hi"
 
-async def get_api_reply(user_id, word: str):
-    try:
-        msg = quote(word)
-        url = CHAT_API_URL.format(msg, user_id)
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=10) as response:
-                if response.status == 200:
-                    data = await response.json()
+# --- Fetcher with Double Fallback ---
+async def get_working_reply(text):
+    msg = quote(text)
+    async with aiohttp.ClientSession() as session:
+        # Step 1: Popcat API try karein (Very Stable)
+        try:
+            async with session.get(API_STABLE.format(msg), timeout=8) as r1:
+                if r1.status == 200:
+                    data = await r1.json()
                     return data.get("response")
-    except:
-        return None
+        except: pass
 
-# --- Main Chatbot Logic ---
+        # Step 2: Hercai API try karein (Backup)
+        try:
+            async with session.get(API_BACKUP.format(msg), timeout=8) as r2:
+                if r2.status == 200:
+                    data = await r2.json()
+                    return data.get("reply")
+        except: pass
+    return None
+
+# --- Main Logic ---
 
 @nexichat.on_message((filters.text | filters.sticker) & ~filters.bot, group=2)
 async def chatbot_response(client: Client, message: Message):
     chat_id = message.chat.id
-    user_id = message.from_user.id if message.from_user else chat_id
     
-    # 1. Database se check karein ki chatbot enabled hai ya nahi
+    # 1. Status Check
     chat_status = status_db.find_one({"chat_id": chat_id})
     if chat_status and chat_status.get("status") == "disabled":
         return
 
-    # 2. Commands ko ignore karein
+    # 2. Skip Commands
     if message.text and message.text.startswith(("/", "!", ".")):
         return
 
-    # 3. Message triggers
-    user_text = message.text if message.text else ""
+    # 3. Trigger Conditions
     me = await client.get_me()
-    
     is_private = message.chat.type.value == "private"
-    is_reply_to_me = False
-    if message.reply_to_message and message.reply_to_message.from_user:
-        if message.reply_to_message.from_user.id == me.id:
-            is_reply_to_me = True
-            
-    # Agar bot ka naam mention kiya jaye
-    is_mentioned = False
-    if message.text and (f"@{me.username}" in message.text or me.first_name.lower() in message.text.lower()):
-        is_mentioned = True
+    is_reply_to_me = message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.id == me.id
+    is_mentioned = message.text and (f"@{me.username}" in message.text or me.first_name.lower() in message.text.lower())
 
-    # Group mein reply dene ke conditions:
-    # 1. Private Chat ho
-    # 2. Bot ko reply kiya gaya ho
-    # 3. Bot ka naam liya gaya ho
-    # 4. (Optional) Har message pe reply chahiye toh niche 'True' add kar dein
-    
     if is_private or is_reply_to_me or is_mentioned:
         if not message.text: return
         
         await client.send_chat_action(chat_id, ChatAction.TYPING)
         
-        api_reply = await get_api_reply(user_id, user_text)
+        # Working API se reply mangwana
+        raw_reply = await get_working_reply(message.text)
         
-        if api_reply:
-            final_text = make_female_tone(api_reply)
+        if raw_reply:
+            # 1. Female Tone apply karna
+            final_text = make_female_tone(raw_reply)
+
+            # 2. Translation (Kyunki ye APIs English mein hoti hain)
             chat_lang = get_chat_language(chat_id)
-            if chat_lang not in ["hi", "en", "nolang"]:
+            if chat_lang not in ["nolang"]: # Default Hindi/Any
                 try:
-                    final_text = GoogleTranslator(source='auto', target=chat_lang).translate(final_text)
+                    # Translate to chat's preferred language (Default hi)
+                    target = chat_lang if chat_lang != "en" else "en"
+                    final_text = GoogleTranslator(source='auto', target=target).translate(final_text)
                 except: pass
             
             await message.reply_text(final_text)
+        else:
+            if is_private:
+                await message.reply_text("Uff... abhi mood thoda off hai, baad mein baat karein? 🌸")
 
-# --- Chatbot Toggle Command ---
+# --- Admin Controls ---
+
 @nexichat.on_message(filters.command("chatbot"))
 async def chat_toggle(client: Client, message: Message):
     if not await is_admin(client, message.chat.id, message.from_user.id):
-        return await message.reply_text("Admin only! ❌")
+        return await message.reply_text("Sirf admins hi use kar sakte hain! ❌")
 
     status = "Enabled ✅"
     curr = status_db.find_one({"chat_id": message.chat.id})
@@ -136,13 +142,13 @@ async def chat_toggle(client: Client, message: Message):
         InlineKeyboardButton("Enable", callback_data="enable_chatbot"),
         InlineKeyboardButton("Disable", callback_data="disable_chatbot")
     ]]
-    await message.reply_text(f"**Chatbot Status:** {status}", reply_markup=InlineKeyboardMarkup(buttons))
+    await message.reply_text(f"**Chatbot Settings**\n\nStatus: {status}", reply_markup=InlineKeyboardMarkup(buttons))
 
 @nexichat.on_callback_query(filters.regex(r"^(enable|disable)_chatbot$"))
 async def cb_handler(client: Client, query: CallbackQuery):
     if not await is_admin(client, query.message.chat.id, query.from_user.id):
-        return await query.answer("Mana kiya na!", show_alert=True)
+        return await query.answer("Access Denied!", show_alert=True)
 
     action = query.data.split("_")[0]
     status_db.update_one({"chat_id": query.message.chat.id}, {"$set": {"status": f"{action}d"}}, upsert=True)
-    await query.edit_message_text(f"✅ Chatbot now **{action}d**!")
+    await query.edit_message_text(f"✅ Chatbot successfully **{action}d**!")
