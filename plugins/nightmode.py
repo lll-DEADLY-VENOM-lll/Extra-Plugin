@@ -11,7 +11,7 @@ from pyrogram.types import (
 )
 
 from VIPMUSIC import app
-# Database logic ko isi file mein merge kar diya gaya hai error fix karne ke liye
+# Database logic
 from VIPMUSIC.core.mongo import mongodb
 
 # --- Database Setup ---
@@ -33,22 +33,15 @@ async def nightmode_off(chat_id: int):
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- Chat Permissions ---
+# --- Chat Permissions (FIXED FOR PYROGRAM v2) ---
+# Pyrogram v2 mein 'can_send_messages=False' karne se sab band ho jata hai.
 CLOSE_CHAT = ChatPermissions(
-    can_send_messages=False,
-    can_send_media_messages=False,
-    can_send_other_messages=False,
-    can_send_polls=False,
-    can_change_info=False,
-    can_add_web_page_previews=False,
-    can_pin_messages=False,
-    can_invite_users=False,
+    can_send_messages=False
 )
 
 OPEN_CHAT = ChatPermissions(
     can_send_messages=True,
     can_send_media_messages=True,
-    can_send_other_messages=True,
     can_send_polls=True,
     can_change_info=True,
     can_add_web_page_previews=True,
@@ -75,9 +68,12 @@ ADD_ME_BUTTON = InlineKeyboardMarkup(
 
 @app.on_message(filters.command("nightmode") & filters.group)
 async def _nightmode(_, message: Message):
-    user = await app.get_chat_member(message.chat.id, message.from_user.id)
-    if user.status not in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
-        return await message.reply_text("❌ **Sᴏʀʀʏ, ᴏɴʟʏ ᴀᴅᴍɪɴɪsᴛʀᴀᴛᴏʀs ᴄᴀɴ ᴀᴄᴄᴇss ᴛʜᴇsᴇ sᴇᴛᴛɪɴɢs.**")
+    try:
+        user = await app.get_chat_member(message.chat.id, message.from_user.id)
+        if user.status not in [enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]:
+            return await message.reply_text("❌ **Sᴏʀʀʏ, ᴏɴʟʏ ᴀᴅᴍɪɴɪsᴛʀᴀᴛᴏʀs ᴄᴀɴ ᴀᴄᴄᴇss ᴛʜᴇsᴇ sᴇᴛᴛɪɴɢs.**")
+    except Exception:
+        return
 
     await message.reply_photo(
         photo="https://telegra.ph//file/06649d4d0bbf4285238ee.jpg",
@@ -119,23 +115,18 @@ async def start_nightmode():
     for chat in schats:
         chat_id = int(chat["chat_id"])
         try:
+            await app.set_chat_permissions(chat_id, CLOSE_CHAT)
             await app.send_photo(
                 chat_id,
                 photo="https://telegra.ph//file/06649d4d0bbf4285238ee.jpg",
                 caption=(
-                    "🌟 **ɢᴏᴏᴅ ɴɪɢʜᴛ ᴅᴇᴀʀ ᴍᴇᴍʙᴇʀs! ᴛʜᴇ ᴅᴀʏ ʜᴀs ᴄᴏᴍᴇ ᴛᴏ ᴀɴ ᴇɴᴅ.**\n"
-                    "ᴀs ᴛʜᴇ sᴛᴀʀs ʙᴇɢɪɴ ᴛᴏ sʜɪɴᴇ, ɪᴛ ɪs ᴛɪᴍᴇ ᴛᴏ ɢɪᴠᴇ ʏᴏᴜʀ ᴍɪɴᴅ ᴀɴᴅ ʙᴏᴅʏ ᴀ \n"
-                    "ᴡᴇʟʟ-ᴅᴇsᴇʀᴠᴇᴅ ʀᴇsᴛ. ᴡᴇ ʜᴏᴘᴇ ʏᴏᴜ ʜᴀᴅ ᴀ ᴘʀᴏᴅᴜᴄᴛɪᴠᴇ ᴅᴀʏ ᴛᴏᴅᴀʏ. ɴᴏᴡ, \n"
-                    "ʟᴇᴛ ᴛʜᴇ sɪʟᴇɴᴄᴇ ᴏғ ᴛʜᴇ ɴɪɢʜᴛ ʙʀɪɴɢ ʏᴏᴜ sᴇʀᴇɴɪᴛʏ ᴀɴᴅ ᴘᴇᴀᴄᴇ. ᴛʜɪs \n"
-                    "ᴄʜᴀᴛ ɪs ɴᴏᴡ ᴄʟᴏsɪɴɢ ᴛᴏ ᴇɴsᴜʀᴇ ᴇᴠᴇʀʏᴏɴᴇ ᴇɴᴊᴏʏs ᴀ ᴅɪsᴛᴜʀʙᴀɴᴄᴇ-ғʀᴇᴇ \n"
-                    "sʟᴇᴇᴘ. ᴘʟᴇᴀsᴇ ᴅʀᴇᴀᴍ ʙɪɢ ᴀɴᴅ ᴡᴀᴋᴇ ᴜᴘ ᴡɪᴛʜ ɴᴇᴡ ᴇɴᴇʀɢʏ ᴛᴏᴍᴏʀʀᴏᴡ. \n"
-                    "ᴀʟʟ ᴍᴇssᴀɢɪɴɢ ᴘᴇʀᴍɪssɪᴏɴs ᴀʀᴇ ʜᴀʟᴛᴇᴅ ᴜɴᴛɪʟ sᴜɴʀɪsᴇ. sʟᴇᴇᴘ ᴛɪɢʜᴛ, \n"
-                    "ᴛᴀᴋᴇ ᴄᴀʀᴇ ᴏғ ʏᴏᴜʀsᴇʟғ, ᴀɴᴅ ᴍᴀʏ ᴛʜᴇ ᴀɴɢᴇʟs ɢᴜᴀʀᴅ ʏᴏᴜʀ ᴅʀᴇᴀᴍs. ᴡᴇ \n"
-                    "ᴡɪʟʟ ʙᴇ ʙᴀᴄᴋ ᴏɴʟɪɴᴇ ᴀᴛ **𝟶𝟼:𝟶𝟶 ᴀᴍ [ɪsᴛ]**. ɢᴏᴏᴅ ɴɪɢʜᴛ ᴇᴠᴇʀʏᴏɴᴇ! ✨"
+                    "🌟 **ɢᴏᴏᴅ ɴɪɢʜᴛ ᴅᴇᴀʀ ᴍᴇᴍʙᴇʀs! ᴛʜᴇ ᴅᴀʏ ʜᴀs ᴄᴏᴍᴇ ᴛᴏ ᴀɴ ᴇɴᴅ.**\n\n"
+                    "ᴛʜɪs ᴄʜᴀᴛ ɪs ɴᴏᴡ ᴄʟᴏsɪɴɢ ᴛᴏ ᴇɴsᴜʀᴇ ᴇᴠᴇʀʏᴏɴᴇ ᴇɴᴊᴏʏs ᴀ ᴅɪsᴛᴜʀʙᴀɴᴄᴇ-ғʀᴇᴇ "
+                    "sʟᴇᴇᴘ. ᴀʟʟ ᴍᴇssᴀɢɪɴɢ ᴘᴇʀᴍɪssɪᴏɴs ᴀʀᴇ ʜᴀʟᴛᴇᴅ ᴜɴᴛɪʟ sᴜɴʀɪsᴇ.\n\n"
+                    "**ᴡᴇ ᴡɪʟʟ ʙᴇ ʙᴀᴄᴋ ᴏɴʟɪɴᴇ ᴀᴛ 𝟶𝟼:𝟶𝟶 ᴀᴍ [ɪsᴛ].** ɢᴏᴏᴅ ɴɪɢʜᴛ! ✨"
                 ),
                 reply_markup=ADD_ME_BUTTON,
             )
-            await app.set_chat_permissions(chat_id, CLOSE_CHAT)
             await asyncio.sleep(0.3)
         except Exception as e:
             logger.error(f"Error in start_nightmode for {chat_id}: {e}")
@@ -146,24 +137,17 @@ async def close_nightmode():
     for chat in schats:
         chat_id = int(chat["chat_id"])
         try:
+            await app.set_chat_permissions(chat_id, OPEN_CHAT)
             await app.send_photo(
                 chat_id,
                 photo="https://telegra.ph//file/14ec9c3ff42b59867040a.jpg",
                 caption=(
-                    "☀️ **ɢᴏᴏᴅ ᴍᴏʀɴɪɴɢ ᴇᴠᴇʀʏᴏɴᴇ! ᴀ ʙʀᴀɴᴅ ɴᴇᴡ ᴅᴀʏ ʜᴀs ᴅᴀᴡɴᴇᴅ.**\n"
-                    "ʀɪsᴇ ᴀɴᴅ sʜɪɴᴇ! ɪᴛ ɪs ᴛɪᴍᴇ ᴛᴏ ᴇᴍʙʀᴀᴄᴇ ᴛʜᴇ ɴᴇᴡ ᴏᴘᴘᴏʀᴛᴜɴɪᴛɪᴇs ᴛʜᴀᴛ \n"
-                    "ᴛʜɪs ʙᴇᴀᴜᴛɪғᴜʟ ᴍᴏʀɴɪɴɢ ʙʀɪɴɢs ᴛᴏ ʏᴏᴜʀ ʟɪғᴇ. ᴛʜᴇ sᴜɴ ɪs ᴜᴘ, ᴀɴᴅ \n"
-                    "ᴛʜᴇ ᴡᴏʀʟᴅ ɪs ᴡᴀɪᴛɪɴɢ ғᴏʀ ʏᴏᴜ ᴛᴏ ᴍᴀᴋᴇ ᴀ ᴅɪғғᴇʀᴇɴᴄᴇ. ᴡᴇ ᴀʀᴇ ɴᴏᴡ \n"
-                    "ᴏᴘᴇɴɪɴɢ ᴛʜᴇ ɢʀᴏᴜᴘ ᴄʜᴀᴛ sᴏ ʏᴏᴜ ᴄᴀɴ ᴄᴏɴɴᴇᴄᴛ, sʜᴀʀᴇ, ᴀɴᴅ ɢʀᴏᴡ ᴡɪᴛʜ \n"
-                    "ᴇᴀᴄʜ ᴏᴛʜᴇʀ ᴀɢᴀɪɴ. ᴍᴀʏ ᴛʜɪs ᴅᴀʏ ʙᴇ ғɪʟʟᴇᴅ ᴡɪᴛʜ ᴘᴏsɪᴛɪᴠɪᴛʏ, ʟᴏᴠᴇ, \n"
-                    "ᴀɴᴅ ᴜɴsᴛᴏᴘᴘᴀʙʟᴇ sᴜᴄᴄᴇss. ʙᴇ ᴋɪɴᴅ ᴛᴏ ᴏɴᴇ ᴀɴᴏᴛʜᴇʀ ᴀɴᴅ ᴋᴇᴇᴘ ᴛʜᴇ \n"
-                    "ᴇɴᴇʀɢʏ ʜɪɢʜ! ᴀʟʟ ᴍᴇssᴀɢɪɴɢ ᴘᴇʀᴍɪssɪᴏɴs ʜᴀᴠᴇ ʙᴇᴇɴ ʀᴇsᴛᴏʀᴇᴅ ʙʏ ᴛʜᴇ \n"
-                    "sʏsᴛᴇᴍ. ʟᴇᴛ's sᴛᴀʀᴛ ᴛʜᴇ ᴅᴀʏ ᴡɪᴛʜ ᴀ sᴍɪʟᴇ ᴀɴᴅ ᴀ ɢʀᴇᴀᴛ ᴠɪʙᴇ. ʜᴀᴠᴇ \n"
-                    "ᴀ ᴡᴏɴᴅᴇʀғᴜʟ ᴀɴᴅ ʙʟᴇssᴇᴅ ᴅᴀʏ ᴀʜᴇᴀᴅ! 🔓✨"
+                    "☀️ **ɢᴏᴏᴅ ᴍᴏʀɴɪɴɢ ᴇᴠᴇʀʏᴏɴᴇ! ʀɪsᴇ ᴀɴᴅ sʜɪɴᴇ!**\n\n"
+                    "ᴛʜᴇ ɢʀᴏᴜᴘ ɪs ɴᴏᴡ ᴏᴘᴇɴ ᴀɢᴀɪɴ. ᴀʟʟ ᴍᴇssᴀɢɪɴɢ ᴘᴇʀᴍɪssɪᴏɴs ʜᴀᴠᴇ ʙᴇᴇɴ ʀᴇsᴛᴏʀᴇᴅ.\n\n"
+                    "**ʜᴀᴠᴇ ᴀ ᴡᴏɴᴅᴇʀғᴜʟ ᴅᴀʏ ᴀʜᴇᴀᴅ!** 🔓✨"
                 ),
                 reply_markup=ADD_ME_BUTTON,
             )
-            await app.set_chat_permissions(chat_id, OPEN_CHAT)
             await asyncio.sleep(0.3)
         except Exception as e:
             logger.error(f"Error in close_nightmode for {chat_id}: {e}")
